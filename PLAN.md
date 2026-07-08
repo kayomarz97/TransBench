@@ -21,12 +21,21 @@ venv, then add only the curated light dependency set.** Reproduced and locked in
   (web/LLM/schema stack only). Verified absent from the venv: `asyncpg`, `pgvector`, `redis`,
   `firebase-admin`, `boto3`, `sqlalchemy`, `dspy-ai`, `sentry-sdk`, `alembic`, `gunicorn`,
   `bcrypt`, `slowapi` — none of Iatronix's DB/cloud tree leaked in.
-- `tests/test_reuse_imports.py` — **11/11 passed** inside the venv, in a scrubbed environment
-  (`env -i` + only `PATH`/`HOME`/`PYTHONDONTWRITEBYTECODE=1`), i.e. with **no env vars at all**
-  beyond what's needed to run Python — no `DATABASE_URL`, `REDIS_URL`, `ENCRYPTION_KEY`,
-  `ANTHROPIC_API_KEY`, or `SENTRY_DSN`. All 8 DB-free leaves import; `resolve_provider`
-  correctly maps `claude-sonnet-4-6` and `claude-haiku-4-5-20251001` to `"anthropic"`, with and
-  without explicit `user_provider="anthropic"`.
+- `tests/test_reuse_imports.py` — **11/11 passed** with the plain, documented invocation
+  (`PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q tests/test_reuse_imports.py`) run
+  under this session's **normal, unscrubbed ambient env** (`ANTHROPIC_API_KEY` genuinely set, as
+  it is for every later phase's real BYOK calls). The "no env var required at import" claim is
+  proven *inside* `test_no_env_vars_required_at_import` by importing all 8 leaves in a **child
+  subprocess whose own environment is explicitly scrubbed** (only `PATH` +
+  `PYTHONDONTWRITEBYTECODE=1` — no `DATABASE_URL`/`REDIS_URL`/`ENCRYPTION_KEY`/
+  `ANTHROPIC_API_KEY`/`SENTRY_DSN` passed through) and asserting `returncode == 0` — the test
+  makes **no assertion about this pytest process's own ambient env**, so it is correct and green
+  regardless of what's exported in the invoking shell. (Phase 0 originally got this backwards —
+  it asserted the *parent* shell lacked `ANTHROPIC_API_KEY`, which is wrong: that var is a
+  legitimate, normally-set BYOK runtime var, BUILD_SPEC §0.4 — Opus verification caught this and
+  it was fixed before Phase 0 closed.) All 8 DB-free leaves import; `resolve_provider` correctly
+  maps `claude-sonnet-4-6` and `claude-haiku-4-5-20251001` to `"anthropic"`, with and without
+  explicit `user_provider="anthropic"`.
 - `import app` resolves to `/root/projects/med-ai-project/backend/app/__init__.py` — i.e. the
   installed package **is** the live Iatronix source tree (editable install), not a copy. This is
   what makes `provider_registry`'s `Path(__file__).resolve().parents[2] / "config" /
@@ -207,5 +216,5 @@ Runs all `tests/*`; runs the flagship end-to-end; captures run manifest + token 
 
 - `.venv` python: `Python 3.12.12`
 - `import app` → `/root/projects/med-ai-project/backend/app/__init__.py`
-- `tests/test_reuse_imports.py`: `11 passed in 0.30s` (scrubbed env, only `PATH`/`HOME`/`PYTHONDONTWRITEBYTECODE=1` set)
+- `tests/test_reuse_imports.py`: `11 passed in 0.99s` -- plain invocation, this session's normal ambient env (`ANTHROPIC_API_KEY` set, length 108); the import-time-env-free claim is proven inside the test via an internally scrubbed subprocess, not by scrubbing the outer pytest process (see §0 above)
 - Iatronix `git status --porcelain` BEFORE == AFTER == `?? plans/promote-dev-to-prod-2026-06-15.md` / `?? plans/update-readme-2026-06-15.md`; `git diff --quiet` exit 0 both times.
