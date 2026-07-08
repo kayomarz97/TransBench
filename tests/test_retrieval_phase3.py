@@ -4,11 +4,14 @@ REAL PubMed + Anthropic API call test — requires a working
 ``ANTHROPIC_API_KEY`` (skips cleanly, with a clear reason, if absent). Runs
 the FLAGSHIP observation through the full ``run_transbench()`` pipeline
 (agents 1-4 now real: decompose, hypothesize, retrieve, grade) — exactly ONE
-flagship pass, per the phase's spend-limiting instruction. Asserts each
-hypothesis's evidence items carry a real digit-string PMID with a resolvable
-``https://pubmed.ncbi.nlm.nih.gov/`` URL. Handles the genuinely-empty case
-gracefully (no crash) but the flagship's well-studied hypotheses should
-return evidence for at least one hypothesis overall.
+flagship pass, per the phase's spend-limiting instruction. Asserts EVERY
+hypothesis returns >=1 real, PMID-backed ``EvidenceItem`` whose
+``reference.pmid`` is a digit-string with a resolvable
+``https://pubmed.ncbi.nlm.nih.gov/`` URL — the literal BUILD_SPEC.md §3
+acceptance bar (Opus review, DEFECT 2 fix: an earlier version of this test
+only asserted >=1 evidence item ACROSS all hypotheses, which could hide a
+per-hypothesis retrieval-quality regression; restored to the per-hypothesis
+bar the spec actually requires).
 """
 from __future__ import annotations
 
@@ -38,10 +41,19 @@ def test_flagship_retrieve_and_grade_real_calls() -> None:
 
     assert len(brief.hypotheses) >= 1
 
-    any_evidence = False
     for gh in brief.hypotheses:
+        h = gh.hypothesis
+        # The literal BUILD_SPEC.md §3 acceptance bar: EACH hypothesis
+        # returns >=1 real PMID-backed EvidenceItem for the flagship's
+        # well-studied area. Do NOT weaken this to an any-hypothesis check —
+        # if a specific hypothesis still can't ground after the entity-query
+        # fix, that must surface here as a failure to investigate, not be
+        # silently averaged away across hypotheses.
+        assert len(gh.evidence) >= 1, (
+            f"hypothesis {h.id} [{h.axis}] '{h.statement[:80]}...' returned "
+            f"ZERO grounded evidence"
+        )
         for item in gh.evidence:
-            any_evidence = True
             pmid = item.reference.pmid or ""
             assert _PMID_RE.match(pmid), f"non-digit pmid: {pmid!r}"
             assert item.reference.url and item.reference.url.startswith(
@@ -59,12 +71,6 @@ def test_flagship_retrieve_and_grade_real_calls() -> None:
         # Phase 4/5 fields must still be honest placeholders (not built this phase)
         assert gh.grounded is False
 
-    # The flagship targets a well-studied area (RAAS-resistant hypertension /
-    # T-cell-IL-17 / vascular inflammation) -- real PubMed should return
-    # SOMETHING for at least one hypothesis. A total-zero result across every
-    # hypothesis would indicate a wiring bug, not a legitimately empty area.
-    assert any_evidence, "expected >=1 PMID-backed EvidenceItem across the flagship's hypotheses"
-
     # Printed (not asserted) so a human can eyeball real grounding, per the
     # coordinator's request — visible with `pytest -q -s`.
     print("\n--- Phase 3 flagship retrieval+grading output ---")
@@ -74,7 +80,7 @@ def test_flagship_retrieve_and_grade_real_calls() -> None:
         snap = retrieval_snapshot.get(h.id, {})
         print(f"\nHypothesis {h.id} [{h.axis}]: {h.statement[:120]}")
         print(f"  neutralized query: {snap.get('neutral_query')}")
-        print(f"  pubmed query (shortened): {snap.get('pubmed_query')}")
+        print(f"  pubmed query (entity-based): {snap.get('pubmed_query')}")
         print(f"  supporting={gh.supporting_count} contradicting={gh.contradicting_count}")
         for item in gh.evidence:
             print(

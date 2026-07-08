@@ -224,6 +224,21 @@ def _normalize_enum_field(item: dict, field: str, valid_values: frozenset[str]) 
             item[field] = lowered
 
 
+def _coerce_bool(value: Any) -> bool:
+    """Robustly interpret a value that SHOULD be a JSON boolean but might
+    come back as a string (a known LLM inconsistency — ``json.loads``
+    already turns a real JSON ``true``/``false`` literal into a proper
+    Python bool, but a model can instead emit the STRING ``"false"``, which
+    plain ``bool("false")`` would wrongly treat as truthy since it's a
+    non-empty string). ``"false"``/``"no"``/``"0"``/``""`` (case-insensitive,
+    stripped) are treated as False; everything else via normal Python
+    truthiness. Used for both ``bears_on_hypothesis`` and ``supports`` in
+    :func:`run_grade` for consistent, correct handling of either field."""
+    if isinstance(value, str):
+        return value.strip().lower() not in {"false", "no", "0", ""}
+    return bool(value)
+
+
 async def _ainvoke_json(llm, system_prompt: str, user_content: str) -> Any:
     """Call the LLM with a system+user message pair and parse the response as
     JSON. Always ``await``s ``llm.ainvoke(...)`` — NEVER the blocking
@@ -393,36 +408,46 @@ _QUERY_STOPWORDS = frozenset(
         "these", "those", "as", "at", "its", "mediated", "contributes", "contribute",
         "associated", "involving", "causing", "cause", "causes", "driven", "drives",
         "drive", "leading", "leads", "lead", "resulting", "result", "results", "non",
+        # Generic clinical modifiers: individually near-useless as a PubMed
+        # search anchor, and the tell-tale false-positive catch of Iatronix's
+        # OWN neutralize_query heuristic-fallback extractor (a plain regex,
+        # `[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*`, that fires whenever the LLM call
+        # inside neutralize_query misses its own 800ms hard timeout — it has
+        # no concept of what a real entity is, so it grabs ANY capitalized
+        # word, including ones merely capitalized because they start a
+        # sentence, e.g. "Chronic" from "Chronic activation..." — measured
+        # live: this produced the query "Chronic hypertension", which
+        # returned 8 results, ALL off-topic).
+        "chronic", "acute", "persistent", "sustained", "elevated", "increased",
+        "decreased", "reduced", "severe", "mild", "moderate", "significant",
+        "marked", "direct", "indirect", "primary", "secondary", "dependent",
+        "independent",
     }
 )
+# Symbol-like tokens: gene/protein/pathway/receptor names (NLRP3, SLC12A3,
+# WNK4, NCC, eNOS, ACE, LDL, ...) — 2+ consecutive uppercase letters
+# (optionally with a leading lowercase, e.g. "eNOS"), or a letter run
+# containing a digit. These are the highest-signal PubMed search anchors a
+# hypothesis statement contains, and neither `neutralize_query`'s own LLM
+# extraction NOR (especially) its heuristic timeout-fallback reliably catch
+# them — the fallback's `[A-Z][a-z]+` regex specifically CANNOT match an
+# ALL-CAPS/digit token like "NLRP3" or "SLC12A3" (verified: Iatronix's own
+# heuristic extractor never returns these for jargon-dense hypothesis text).
+_SYMBOL_RE = re.compile(r"\b[A-Za-z]*[A-Z]{2,}[A-Za-z0-9]*\b|\b[A-Za-z]+\d+[A-Za-z0-9]*\b")
 _WORD_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9\-]*")
+_PLAIN_WORD_RE = re.compile(r"[A-Za-z]+")  # no digits/hyphens -- splits hyphenated compounds into parts
 
 
 def _shorten_for_pubmed(text: str, max_words: int = 6) -> str:
-    """Derive a short, keyword-style PubMed query from a full sentence.
+    """Derive a short, keyword-style PubMed query from a full sentence by
+    keeping the first ``max_words`` content words IN SENTENCE ORDER.
 
-    Load-bearing fix, empirically validated during Phase 3 development.
-    BUILD_SPEC.md §3's literal pseudocode passes the full ``neutral_
-    clinical_question`` sentence directly into ``fetch_evidence_data``, but
-    PubMed's ``[Title/Abstract]`` search is literal keyword/phrase matching,
-    not semantic search: a full mechanistic-hypothesis SENTENCE (or
-    ``neutralize_query``'s own rephrasing of one, which stays sentence-
-    length) reliably returned ZERO PubMed hits in testing against 3 real
-    flagship-style hypothesis statements. A short (~6-word), stopword- and
-    hyphenated-compound-stripped query over the SAME underlying concepts
-    reliably returned real, on-topic hits (2-3/3 same hypotheses, incl. a
-    hit literally titled "Aldosterone breakthrough during therapy with
-    angiotensin-converting enzyme inhibitors..." for the aldosterone-
-    breakthrough hypothesis). Hyphenated compounds are stripped because
-    hypothesis statements coin novel descriptive terms ("RAAS-resistant",
-    "non-ACE-dependent", "effector-memory") that — almost by definition,
-    since BUILD_SPEC.md §5 explicitly asks for genuinely OPEN/novel
-    hypotheses — won't appear verbatim in EXISTING published abstracts; the
-    plain nouns naming the actual biological entities (T cell, IL-17,
-    aldosterone, WNK4, hypertension, ...) are what real papers use, and
-    those are what this function keeps. A hypothesis about a genuinely
-    sparse/novel gene combination can still legitimately return nothing —
-    handled gracefully by ``run_retrieve``, not a bug in this function.
+    LAST-RESORT FALLBACK — used by :func:`_entity_pubmed_query` only when
+    NOTHING else (gene/pathway symbols, ``stance.entities``, plain sentence
+    content words) yields any usable term at all (essentially never, in
+    practice, since a real hypothesis statement almost always contains at
+    least one content word — this exists as a final safety net so
+    :func:`_entity_pubmed_query` always returns a non-empty query).
 
     Deterministic, no LLM (called only from the no-LLM Evidence Retriever,
     agent 3, per BUILD_SPEC.md §3/§5).
@@ -437,6 +462,103 @@ def _shorten_for_pubmed(text: str, max_words: int = 6) -> str:
         if len(kept) >= max_words:
             break
     return " ".join(kept) if kept else text
+
+
+def _is_high_signal_term(word: str) -> bool:
+    """True iff ``word`` is a usable PubMed search term: not a stopword/
+    generic-clinical-modifier and longer than 2 characters."""
+    w = word.strip()
+    return len(w) > 2 and w.lower() not in _QUERY_STOPWORDS
+
+
+def _entity_pubmed_query(
+    stance_entities: list[str], neutral: str, max_terms: int = 3, max_symbols: int = 1
+) -> str:
+    """Build a short, HIGH-SIGNAL PubMed query — the DEFECT 1 fix (Opus
+    review; two earlier attempts were themselves found to regress on real
+    data before converging on this design — see the narrative below).
+
+    PubMed ANDs terms in a ``[Title/Abstract]`` search, and — measured
+    directly against real flagship hypothesis text — the sweet spot is
+    narrow: exactly 2-3 well-chosen terms consistently found real, on-topic
+    PMIDs (``"SLC12A3 NCC"`` -> 8; ``"NLRP3 activation renal"`` -> 9, incl.
+    "The cardio-renal-metabolic role of NLRP3..." and an "Oral NLRP3
+    Inhibitor" trial; ``"ACE Aldosterone breakthrough"`` -> 5, incl. PMID
+    25224804 "Aldosterone breakthrough with benazepril..."), while stacking
+    2+ highly-specific gene symbols TOGETHER regularly found NOTHING or only
+    a weak, off-topic hit (``"SLC12A3 NCC WNK4 SPAK"`` -> 0; ``"NLRP3 DAMPs
+    activation"`` -> 2, off-topic) — real abstracts rarely co-mention that
+    many distinct specific terms at once, and the single most reliable
+    symbol match is usually a better anchor than a second, weaker one.
+    Terms are gathered from THREE sources, in priority order, until
+    ``max_terms`` is reached:
+
+    1. Gene/pathway-SYMBOL-like token(s) scanned directly out of ``neutral``
+       (see ``_SYMBOL_RE`` above), capped at ``max_symbols`` (default 1) —
+       the single most reliable, specific anchor a hypothesis statement
+       contains (NLRP3, SLC12A3, WNK4, NCC, eNOS, ACE, ...), and the one
+       ``neutralize_query``'s own extraction most reliably MISSES,
+       especially via its heuristic timeout-fallback path (measured live:
+       that fallback's own entity list for a real hypothesis was just
+       ``["Chronic"]`` — a sentence-initial capitalized common word, not a
+       real entity at all; its regex structurally cannot match an
+       ALL-CAPS/digit token like "NLRP3"). Capped at just 1 (not several)
+       because a 2nd, weaker symbol competing for a query slot measurably
+       produced worse results than letting a genuine content word (e.g.
+       "inflammasome"/"activation") fill that slot instead.
+    2. ``neutralize_query``'s own ``stance.entities`` (drug/disease names) —
+       filtered through the same stopword/generic-modifier/length check
+       (:func:`_is_high_signal_term`) so a heuristic-fallback artifact like
+       "Chronic" or "In" never becomes a query term on its own.
+    3. Plain sentence content words (hyphenated compounds SPLIT into parts,
+       not dropped whole — e.g. "chymase-mediated" contributes "chymase";
+       "mediated" is filtered separately as a stopword) — fills any
+       remaining room, covering PHRASE-based hypotheses with no single gene
+       symbol (e.g. "aldosterone breakthrough", a named clinical phenomenon,
+       not a gene) and topping up single-symbol cases (e.g. "NLRP3" alone
+       plus "inflammasome activation" from the sentence).
+
+    No automatic disease-domain anchor is appended: measured against real
+    data, unconditionally adding one more term (even a broad one like
+    "hypertension") sometimes pushed an already-good query past the point
+    where PubMed's implicit AND stopped matching anything; ``ensure_
+    evidence``'s own progressive broadening (BUILD_SPEC.md §3) is what
+    handles a query that's still too narrow after this, not a blanket extra
+    term here.
+
+    Falls back to :func:`_shorten_for_pubmed` only if literally nothing
+    usable is found anywhere (essentially never in practice).
+    """
+    terms: list[str] = []
+    seen: set[str] = set()
+
+    def _add(word: str) -> None:
+        w = word.strip()
+        if not w or w.lower() in seen or not _is_high_signal_term(w):
+            return
+        seen.add(w.lower())
+        terms.append(w)
+
+    symbol_budget = min(max_symbols, max_terms)
+    for m in _SYMBOL_RE.findall(neutral):
+        if len(terms) >= symbol_budget:
+            break
+        _add(m)
+
+    for e in stance_entities or []:
+        if len(terms) >= max_terms:
+            break
+        _add(e or "")
+
+    if len(terms) < max_terms:
+        for w in _PLAIN_WORD_RE.findall(neutral):
+            if len(terms) >= max_terms:
+                break
+            _add(w)
+
+    if not terms:
+        return _shorten_for_pubmed(neutral)
+    return " ".join(terms)
 
 
 async def run_retrieve(
@@ -489,23 +611,27 @@ async def run_retrieve(
        question`` sentence directly into ``fetch_evidence_data``, and builds
        the contradiction query as a bare, unparenthesized
        ``f"{neutral} limitations OR negative OR no association"`` suffix.
-       Empirically (measured against 3 real flagship-style hypothesis
-       statements during Phase 3 development), this reliably returns ZERO
-       (support pass) or IRRELEVANT (contradiction pass — e.g. multiple
-       myeloma trials for a hypertension/IL-17 hypothesis) results, because
-       (a) PubMed's ``[Title/Abstract]`` search is literal keyword matching,
-       not semantic search, so long synthesized sentences rarely match
-       verbatim, and (b) ``fetch_evidence_data`` wraps whatever string it's
-       given as ``f"{query}[Title/Abstract] AND (...)"`` — a bare trailing
-       ``OR`` breaks that field-tag's intended scope. Fix: derive
-       ``pubmed_query = _shorten_for_pubmed(neutral)`` (short, keyword-style,
-       deterministic, no LLM — see its docstring) and use it everywhere §3
-       uses ``neutral`` for an actual PubMed call; PROPERLY parenthesize the
-       contradiction-pass OR-group: ``f"{pubmed_query} (limitations OR
-       negative OR no association)"``. The TRUE ``neutral_clinical_question``
-       is still what's returned as ``RetrievalResult.neutral_query`` (used
-       for reporting/the run_manifest) — only the actual PubMed calls use
-       the shortened form.
+       PubMed's ``[Title/Abstract]`` search is literal keyword matching, not
+       semantic search, so a long synthesized sentence rarely matches
+       verbatim, and ``fetch_evidence_data`` wraps whatever string it's given
+       as ``f"{query}[Title/Abstract] AND (...)"`` — a bare trailing ``OR``
+       breaks that field-tag's intended scope. Fix (revised twice after Opus
+       review — DEFECT 1): derive ``pubmed_query =
+       _entity_pubmed_query(stance.entities, neutral)`` — a SHORT, HIGH-
+       SIGNAL query built from gene/pathway-symbol-like tokens scanned out of
+       ``neutral`` directly, ``neutralize_query``'s own extracted entities,
+       and (if still short) plain sentence content words, in that priority
+       order (see :func:`_entity_pubmed_query`'s docstring for the full
+       narrative + measurements — two earlier attempts, sentence-truncation-
+       first and entities-only-with-a-forced-anchor, each still discarded
+       high-signal terms or diluted an already-good query on real data; this
+       version does not). Use ``pubmed_query`` everywhere §3 uses ``neutral``
+       for an actual PubMed call; PROPERLY parenthesize the contradiction-
+       pass OR-group: ``f"{pubmed_query} (limitations OR negative OR no
+       association)"``. The TRUE ``neutral_clinical_question`` is still what
+       is returned as ``RetrievalResult.neutral_query`` (used for reporting/
+       the run_manifest) — only the
+       actual PubMed calls use the shortened form.
 
     Never raises: ``EvidenceFloorError`` (all 5 broadening strategies
     exhausted) and any other unexpected error are caught and logged, and this
@@ -519,7 +645,7 @@ async def run_retrieve(
         hypothesis.statement, model_id or config.MODEL_CHEAP, user_key, user_provider
     )
     neutral = stance.neutral_clinical_question
-    pubmed_query = _shorten_for_pubmed(neutral)
+    pubmed_query = _entity_pubmed_query(stance.entities, neutral)
 
     try:
         result = await fetch_evidence_data(pubmed_query)
@@ -598,9 +724,23 @@ async def run_grade(
          match (no resolvable citation) — done HERE, not in agent 3, per
          BUILD_SPEC.md §5's division of labor.
       2. ONE batched Haiku call over all resolvable abstracts (never one call
-         per abstract) -> ``supports``/``grade``/``claim_fragment`` per pmid.
-         ``grade`` is case-insensitively normalized via the same
-         schema-derived :func:`_normalize_enum_field` helper Phase 2 added.
+         per abstract) -> ``bears_on_hypothesis``/``supports``/``grade``/
+         ``claim_fragment`` per pmid. ``grade`` is case-insensitively
+         normalized via the same schema-derived :func:`_normalize_enum_field`
+         helper Phase 2 added; ``bears_on_hypothesis``/``supports`` are
+         parsed via :func:`_coerce_bool` (a model can emit the STRING
+         ``"false"``, which plain ``bool(...)`` would wrongly treat as
+         truthy).
+      2a. DROP any item where ``bears_on_hypothesis`` is not true — BEFORE
+         constructing an ``EvidenceItem`` (Opus review, DEFECT 3 fix): the
+         prompt already asked the model to omit off-topic abstracts on its
+         own, but that was observed to fail in practice (off-topic abstracts
+         emitted as ``supports=False``, i.e. as if they were real
+         contradicting evidence). An explicit per-item relevance signal that
+         the CODE enforces is not optional/best-effort the way an implicit
+         "please omit these" instruction is — an off-topic abstract must
+         never become an ``EvidenceItem`` at all, neither supporting nor
+         contradicting.
       3. Build ``response_data = {"references": [...], "content_items":
          [...]}`` (the "adaptive claim" shape Iatronix's own
          ``_extract_claims`` recognizes: ``text`` + ``source``/``pmid``) and
@@ -670,6 +810,14 @@ async def run_grade(
             continue
         article, registry_entry = pair
 
+        if not _coerce_bool(item.get("bears_on_hypothesis")):
+            logger.info(
+                "grade: dropping off-topic abstract pmid=%s (bears_on_hypothesis=false) — "
+                "never emitted as supporting or contradicting",
+                pmid,
+            )
+            continue
+
         item = dict(item)
         _normalize_enum_field(item, "grade", _GRADE_VALUES)
         grade = item.get("grade")
@@ -678,7 +826,7 @@ async def run_grade(
             continue
 
         claim_fragment = str(item.get("claim_fragment") or "").strip() or (article.get("title") or "")[:200]
-        supports = bool(item.get("supports"))
+        supports = _coerce_bool(item.get("supports"))
 
         reference = Reference(
             source=registry_entry.source,

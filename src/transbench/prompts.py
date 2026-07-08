@@ -63,23 +63,37 @@ EVIDENCE_RETRIEVER_SYSTEM_PROMPT = None
 #    a *coarse* supports/contradicts + evidence-grade classification only —
 #    fine-grained entailment (supports/refutes/unclear) is a deliberately
 #    separate pass (agent 6 / rigor.py, §6) and must NOT be done here.
+#    `bears_on_hypothesis` is an explicit per-item relevance signal (added
+#    after Opus review found off-topic abstracts being emitted as
+#    "contradicting" instead of omitted): agents.run_grade drops any item
+#    where it is false BEFORE constructing an EvidenceItem, rather than
+#    trusting the model to silently omit irrelevant abstracts from its
+#    output on its own.
 # ---------------------------------------------------------------------------
 EVIDENCE_GRADER_SYSTEM_PROMPT = (
     "You are grading retrieved evidence abstracts against ONE mechanistic "
     "hypothesis. You will receive the hypothesis and a list of ranked "
     "abstracts (each with a pmid, title, and abstract text). Process ALL "
     "abstracts for this hypothesis in this single call — never ask for "
-    "abstracts one at a time. For EACH abstract, decide: (1) claim_fragment — "
-    "a short quote or tight paraphrase of the specific sentence(s) bearing on "
-    "the hypothesis; (2) supports — true if the abstract's finding broadly "
-    "supports the hypothesis, false if it broadly contradicts it; (3) grade — "
-    "exactly one of guideline, systematic_review, rct, mechanistic_study, "
-    "observational, preclinical, expert_opinion, based on the abstract's "
-    "study design. Do not assess fine-grained entailment (supports / refutes "
-    "/ unclear) here — that is a separate downstream pass. If an abstract "
-    "does not bear on the hypothesis at all, omit it from the output rather "
-    "than guessing. Never invent a pmid that was not given to you. STRICT "
-    'JSON list of {"pmid","claim_fragment","supports","grade"}.'
+    "abstracts one at a time, and return exactly one JSON item per abstract "
+    "you were given (do not silently skip any). For EACH abstract, decide: "
+    "(1) bears_on_hypothesis — true ONLY if the abstract's actual finding is "
+    "substantively about the hypothesis's specific molecule/cell/pathway/"
+    "mechanism, not merely sharing a keyword or a general disease area; "
+    "false if the abstract is off-topic (a different disease, an unrelated "
+    "drug class or mechanism, or only superficially keyword-matched) — an "
+    "off-topic abstract must NEVER be marked as supporting or contradicting; "
+    "(2) claim_fragment — a short quote or tight paraphrase of the specific "
+    "sentence(s) bearing on the hypothesis (only meaningful when "
+    "bears_on_hypothesis is true); (3) supports — true if the abstract's "
+    "finding broadly supports the hypothesis, false if it broadly "
+    "contradicts it (only meaningful when bears_on_hypothesis is true); "
+    "(4) grade — exactly one of guideline, systematic_review, rct, "
+    "mechanistic_study, observational, preclinical, expert_opinion, based on "
+    "the abstract's study design. Do not assess fine-grained entailment "
+    "(supports / refutes / unclear) here — that is a separate downstream "
+    "pass. Never invent a pmid that was not given to you. STRICT JSON list "
+    'of {"pmid","bears_on_hypothesis","claim_fragment","supports","grade"}.'
 )
 
 # ---------------------------------------------------------------------------
