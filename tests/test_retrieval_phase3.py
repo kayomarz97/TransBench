@@ -65,16 +65,53 @@ import asyncio
 import os
 import re
 
+import anthropic
 import pytest
 
 from tests.fixtures import FLAGSHIP_OBSERVATION
 from transbench.engine import run_transbench
+from transbench.rigor import select_experiment_candidate
 from transbench.schemas import EvidenceGrade
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("ANTHROPIC_API_KEY"),
     reason="Phase 3/4 acceptance test makes REAL Anthropic + PubMed API calls; requires a working ANTHROPIC_API_KEY.",
 )
+
+# Anthropic intermittently throws transient 500s/connection drops that are
+# infra noise, not a code regression -- retried EXACTLY ONCE below (never
+# silently retried forever, so a genuine regression still fails loudly).
+_TRANSIENT_EXCEPTION_TYPES = (anthropic.APIConnectionError, anthropic.InternalServerError)
+
+
+def _is_transient_anthropic_failure(exc: BaseException) -> bool:
+    """True iff ``exc`` looks like a transient Anthropic-side failure (a bare
+    500 / connection drop / overload) rather than a real bug. Matches the
+    exact SDK exception types for those cases, plus a defensive
+    status_code/message sniff for anything a wrapping layer (langchain-
+    anthropic) re-raises one level removed from the raw SDK type."""
+    if isinstance(exc, _TRANSIENT_EXCEPTION_TYPES):
+        return True
+    if getattr(exc, "status_code", None) == 500:
+        return True
+    message = str(exc).lower()
+    return "internal server error" in message or "overloaded" in message or " 500 " in f" {message} "
+
+
+def _run_flagship_with_retry():
+    """Run the flagship observation through the full pipeline, retrying
+    EXACTLY ONCE if the first attempt's failure looks transient (see
+    :func:`_is_transient_anthropic_failure`) -- a non-transient exception, or
+    a second consecutive failure of any kind, still propagates and fails the
+    test (this must never mask a real regression, only real Anthropic
+    infra flakiness)."""
+    try:
+        return asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))
+    except Exception as exc:  # noqa: BLE001 -- narrowed immediately below
+        if not _is_transient_anthropic_failure(exc):
+            raise
+        return asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))
+
 
 _PMID_RE = re.compile(r"^\d+$")
 _VALID_GRADES = set(EvidenceGrade.__args__)  # type: ignore[attr-defined]
@@ -94,7 +131,7 @@ def test_flagship_grounds_end_to_end_without_requiring_every_hypothesis_to() -> 
     the module docstring for why the per-hypothesis bar is "no crash + only
     real citations when any are made" rather than "every fresh hypothesis
     must find literature"."""
-    brief = asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))  # must not raise
+    brief = _run_flagship_with_retry()  # must not raise (a lone transient 500 is retried once)
 
     assert len(brief.hypotheses) >= 1
 
@@ -102,6 +139,7 @@ def test_flagship_grounds_end_to_end_without_requiring_every_hypothesis_to() -> 
     for gh in brief.hypotheses:
         h = gh.hypothesis
 
+        has_supporting_item = False
         if gh.evidence:
             for item in gh.evidence:
                 # If a pmid IS set, it must be a real digit string (never
@@ -117,11 +155,32 @@ def test_flagship_grounds_end_to_end_without_requiring_every_hypothesis_to() -> 
                 assert item.reference.source
                 assert item.claim_fragment.strip()
                 assert item.grade in _VALID_GRADES
+                if item.entailment == "supports":
+                    has_supporting_item = True
         else:
             # No evidence -> MUST be honestly demoted, never phantom-grounded.
             assert gh.grounded is False, (
                 f"hypothesis {h.id} has zero evidence but grounded=True — "
                 f"impossible per BUILD_SPEC.md §6(2), a real bug if it ever happens"
+            )
+
+        # Regression guard (Opus verification, pmid-only entailment-
+        # correlation defect): every item in `gh.evidence` is already
+        # on-topic by construction (agent 4's `bears_on_hypothesis` gate
+        # drops off-topic abstracts before they ever become an EvidenceItem)
+        # and already passed the resolvable-url assertion above -- so ANY
+        # `entailment == "supports"` item here MUST make the hypothesis
+        # grounded. The pmid-only correlation bug never violated this
+        # implication directly (it just made "supports" unreachable for
+        # NCT/DOI items in the first place) -- this assertion is the
+        # contract-level guard that a future regression of the same *shape*
+        # (entailment silently frozen/miscorrelated for some evidence
+        # subset) cannot hide behind.
+        if has_supporting_item:
+            assert gh.grounded is True, (
+                f"hypothesis {h.id} has >=1 on-topic, resolvable, "
+                f"entailment=='supports' evidence item but grounded=False — "
+                f"grounding must follow directly from real supporting entailment"
             )
 
         if gh.evidence and gh.grounded:
@@ -140,6 +199,25 @@ def test_flagship_grounds_end_to_end_without_requiring_every_hypothesis_to() -> 
         "hypotheses would indicate a genuine retrieval/grading regression, "
         "not legitimate per-hypothesis sparsity"
     )
+
+    # Regression guard (Opus verification, live flagship consequence): the
+    # pmid-only entailment-correlation bug froze every NCT/DOI item's
+    # entailment at "unclear", which demoted their hypotheses to
+    # grounded=False and left NO hypothesis both open_question AND grounded
+    # -- select_experiment_candidate returned None, so the flagship produced
+    # NO experiment candidate at all (core path broken). Post-fix, the
+    # flagship's well-studied immune/RAAS-resistant-hypertension area must
+    # yield a real, eligible candidate end to end.
+    selected = select_experiment_candidate(brief.hypotheses)
+    assert selected is not None, (
+        "expected select_experiment_candidate to return a real candidate for "
+        "the flagship -- None means no hypothesis is both open_question AND "
+        "grounded, which would indicate the entailment-correlation/grounding "
+        "chain is broken again"
+    )
+    assert selected.novelty == "open_question"
+    assert selected.grounded is True
+    print(f"\nselect_experiment_candidate (direct call) picked: {selected.hypothesis.id}")
 
     # Printed (not asserted) so a human can eyeball real grounding + do
     # grader-calibration review (retrieved-count vs graded-count per

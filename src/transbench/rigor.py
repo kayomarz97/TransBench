@@ -56,8 +56,40 @@ _NOVELTY_VALUES = frozenset(get_args(NoveltyVerdict))
 # ---------------------------------------------------------------------------
 
 
+def _correlation_id(item: EvidenceItem) -> str:
+    """The stable id used to correlate ONE evidence item's entailment verdict
+    THROUGH the LLM call and back onto the right ``EvidenceItem`` — mirrors
+    ``agents._resolution_key``'s intent (a real pmid when there is one; a
+    stable, always-present fallback otherwise).
+
+    Bug fixed here (Opus verification, proven deterministically): the prior
+    version used ``item.reference.pmid or ""`` directly as this id. ``schemas.
+    Reference`` (BUILD_SPEC.md §4, frozen) carries no ``nct_id``/``doi``
+    field — only ``pmid`` and ``url`` — so EVERY ClinicalTrials.gov/DOI-only
+    evidence item (resolved via ``registry.lookup_id`` in agent 4, added by
+    commit fbf6235) has ``reference.pmid=None``. That collapsed every such
+    item onto the exact same ``""`` key, so none of them could ever be
+    correlated back to the LLM's real verdict — their entailment stayed
+    frozen at the Phase-3 provisional ``"unclear"`` no matter what the model
+    actually returned, which silently demoted real, on-topic, often
+    high-grade (RCT) trial evidence to ungrounded.
+
+    ``url`` is the correct, safe fallback: Iatronix's own ``RegistryArticle.
+    url`` is documented+enforced as "always non-empty (registry rejects items
+    without URL)" (``article_registry.py``), and ``agents.run_grade`` only
+    ever builds an ``EvidenceItem`` from a ``registry.lookup_id(...)`` hit —
+    so ``item.reference.url`` is guaranteed present and unique-per-article
+    for every ``EvidenceItem`` this function ever receives. The trailing
+    ``or ""`` is pure defensive belt-and-suspenders (never expected to
+    trigger against a real ``run_grade``-built item), kept only so this
+    function can never raise on a hand-built test fixture with both fields
+    unset.
+    """
+    return item.reference.pmid or item.reference.url or ""
+
+
 def _entailment_prompt_block(item: EvidenceItem) -> str:
-    return f"- pmid={item.reference.pmid}\n  claim: {item.claim_fragment}"
+    return f"- pmid={_correlation_id(item)}\n  claim: {item.claim_fragment}"
 
 
 async def run_entailment(
@@ -77,10 +109,24 @@ async def run_entailment(
 
     OVERWRITES each item's Phase-3 provisional ``entailment="unclear"``
     placeholder via ``.model_copy(update=...)`` (``EvidenceItem`` instances
-    are never mutated in place). An item whose pmid the model doesn't
-    return, or returns an invalid entailment value for, KEEPS its existing
-    value rather than being dropped — this pass only RECLASSIFIES evidence,
-    it never removes any (that already happened in agent 4's grading).
+    are never mutated in place). An item whose :func:`_correlation_id` the
+    model doesn't echo back, or returns an invalid entailment value for,
+    KEEPS its existing value rather than being dropped — this pass only
+    RECLASSIFIES evidence, it never removes any (that already happened in
+    agent 4's grading).
+
+    Correlation id (Opus verification fix — see :func:`_correlation_id`'s
+    docstring for the full defect + fix narrative): BOTH the prompt block
+    shown to the LLM (``_entailment_prompt_block``) and the match-back below
+    use ``_correlation_id(item)`` — ``item.reference.pmid`` when set, else
+    ``item.reference.url`` (the only other field ``schemas.Reference``
+    guarantees present+unique, since it has no ``nct_id``/``doi`` field).
+    This is STILL sent under the frozen ``RIGOR_ENTAILMENT_SYSTEM_PROMPT``'s
+    unchanged ``"pmid"`` JSON key (that prompt text is verbatim/frozen from
+    BUILD_SPEC.md §6 and never promises the value is a literal PubMed pmid,
+    only that it is the id to echo back) — so every item, pmid-bearing or
+    not, is now genuinely reclassifiable by the LLM's real verdict instead of
+    silently staying "unclear" forever.
 
     Empty input -> ``[]``, no LLM call (nothing to classify).
     """
@@ -98,23 +144,23 @@ async def run_entailment(
     parsed = await agents._ainvoke_json(llm, RIGOR_ENTAILMENT_SYSTEM_PROMPT, user_content)
     raw_items = agents._coerce_list(parsed, preferred_key="items")
 
-    entailment_by_pmid: dict[str, str] = {}
+    entailment_by_key: dict[str, str] = {}
     for item in raw_items:
         if not isinstance(item, dict):
             logger.warning("run_entailment: skipping non-dict item %r", item)
             continue
-        pmid = str(item.get("pmid", ""))
+        key = str(item.get("pmid", ""))
         item = dict(item)
         agents._normalize_enum_field(item, "entailment", _ENTAILMENT_VALUES)
         entailment = item.get("entailment")
         if entailment not in _ENTAILMENT_VALUES:
-            logger.warning("run_entailment: skipping pmid=%s with invalid entailment %r", pmid, item.get("entailment"))
+            logger.warning("run_entailment: skipping id=%s with invalid entailment %r", key, item.get("entailment"))
             continue
-        entailment_by_pmid[pmid] = entailment
+        entailment_by_key[key] = entailment
 
     updated: list[EvidenceItem] = []
     for ev in evidence_items:
-        new_entailment = entailment_by_pmid.get(ev.reference.pmid or "")
+        new_entailment = entailment_by_key.get(_correlation_id(ev))
         if new_entailment is not None and new_entailment != ev.entailment:
             ev = ev.model_copy(update={"entailment": new_entailment})
         updated.append(ev)
