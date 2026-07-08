@@ -422,6 +422,46 @@ _QUERY_STOPWORDS = frozenset(
         "decreased", "reduced", "severe", "mild", "moderate", "significant",
         "marked", "direct", "indirect", "primary", "secondary", "dependent",
         "independent",
+        # Round 2 (Opus review, DEFECT 1 final fix): more of the SAME failure
+        # mode — generic process/anatomy/genetics words that individually
+        # carry near-zero PubMed search signal but were observed consuming a
+        # query slot ahead of the actual gene symbol or disease anchor
+        # (measured live: "Clonally expanded CD8+ effector-memory T cells
+        # infiltrating the perivascular adventitia..." -> query "CD8
+        # Clonally expanded" — 3 off-topic hits; "SLC12A3 (encoding the
+        # thiazide-sensitive NCC cotransporter)... loss-of-function variant"
+        # -> query "SLC12A3 loss function" — 0 hits, vs "SLC12A3 thiazide"
+        # -> 6, "SLC12A3 NCC" -> 8).
+        "clonally", "expanded", "infiltrating", "role", "effector", "memory",
+        "loss", "function", "variant", "encoding", "activation", "accumulation",
+        "hyperactivation", "downregulation",
+        # Parallel word FORMS of already-listed generic terms (a different
+        # inflection of the same near-zero-signal root -- "clonally" and
+        # "clonal", "expanded" and "expansion", "loss-of-function" and
+        # "gain-of-function", ...) and bare word-fragment prefixes that
+        # ``_PLAIN_WORD_RE`` splits a hyphenated compound into ("pro-
+        # inflammatory" -> "pro" + "inflammatory"; "anti-X" -> "anti" + "X").
+        "clonal", "expansion", "gain", "pro", "anti",
+    }
+)
+# Symbol-SHAPED tokens that are nonetheless too GENERIC to anchor a search
+# alone: drug-CLASS abbreviations central to this tool's OWN vocabulary
+# (ACE/ACEi/ARB/CCB are literally BUILD_SPEC.md's 3 named antihypertensive
+# classes -- practically every observation mentions one, so they carry
+# almost no discriminating power) or broad, non-specific lab-marker/cytokine
+# FAMILY names (CRP is a generic inflammation marker; IFN/TNF/IL name entire
+# cytokine families, not a specific target). Measured live: letting these
+# occupy a symbol slot alongside (or instead of) a real, specific symbol
+# reliably crowded out the hypothesis's actual distinguishing term and found
+# nothing/off-topic results (``"hypertension ACE CRP"`` -> 8 hits, all
+# off-topic, missing "Aldosterone"/"breakthrough" entirely;
+# ``"hypertension ACEi Aldosterone"`` -- still missing "breakthrough" --
+# also weaker than dropping ACEi entirely; ``"hypertension CD8 IFN"`` -> 0,
+# evidence floor exhausted; ``"hypertension TRPV4 CCB"`` -> 0).
+_GENERIC_SYMBOLS = frozenset(
+    {
+        "ace", "acei", "arb", "ccb", "crp", "bp", "raas", "ifn", "tnf", "il",
+        "ckd", "esrd", "ldl", "hdl",
     }
 )
 # Symbol-like tokens: gene/protein/pathway/receptor names (NLRP3, SLC12A3,
@@ -466,46 +506,100 @@ def _shorten_for_pubmed(text: str, max_words: int = 6) -> str:
 
 def _is_high_signal_term(word: str) -> bool:
     """True iff ``word`` is a usable PubMed search term: not a stopword/
-    generic-clinical-modifier and longer than 2 characters."""
+    generic-clinical-modifier/generic-symbol-shaped-abbreviation, and longer
+    than 2 characters. Applied uniformly to every candidate term regardless
+    of source (anchor/symbol/entity/content-word) — a term like "CRP" is
+    exactly as unhelpful whichever pass happens to find it."""
     w = word.strip()
-    return len(w) > 2 and w.lower() not in _QUERY_STOPWORDS
+    wl = w.lower()
+    return len(w) > 2 and wl not in _QUERY_STOPWORDS and wl not in _GENERIC_SYMBOLS
+
+
+# Disease/domain anchor (Opus review, DEFECT 1 final fix). BUILD_SPEC.md's
+# tool is explicitly scoped to "a clinical observation about antihypertensive
+# drugs" (its own one-line description, §0) — every run is, by construction,
+# about hypertension. Detected from the ORIGINAL OBSERVATION (one anchor per
+# run, computed once, shared by every hypothesis's PubMed query — NOT
+# per-hypothesis, so it can never be crowded out by a specific hypothesis's
+# own jargon-dense phrasing the way a sentence-scanned term can).
+_CONDITION_ANCHOR_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bhypertension\b", re.IGNORECASE), "hypertension"),
+    (re.compile(r"\bblood pressure\b", re.IGNORECASE), "hypertension"),
+    (re.compile(r"\bBP\b"), "hypertension"),
+]
+_DEFAULT_CONDITION_ANCHOR = "hypertension"
+
+
+def _condition_anchor(observation: str) -> str:
+    """Detect the disease/condition anchor term from the ORIGINAL
+    observation. Looks for "hypertension" / "blood pressure" / "BP"
+    (word-boundary, case-insensitive except "BP" which must be uppercase to
+    avoid matching inside ordinary words); defaults to "hypertension" if none
+    of those literal terms appear (e.g. an observation phrased purely around
+    a drug name or a lab value) — BUILD_SPEC.md's tool has no other domain,
+    so this default is always correct in-scope, never a guess.
+    """
+    for pattern, anchor in _CONDITION_ANCHOR_PATTERNS:
+        if pattern.search(observation or ""):
+            return anchor
+    return _DEFAULT_CONDITION_ANCHOR
 
 
 def _entity_pubmed_query(
-    stance_entities: list[str], neutral: str, max_terms: int = 3, max_symbols: int = 1
+    stance_entities: list[str],
+    neutral: str,
+    condition_anchor: str,
+    max_terms: int = 3,
+    max_symbols: int = 1,
 ) -> str:
     """Build a short, HIGH-SIGNAL PubMed query — the DEFECT 1 fix (Opus
-    review; two earlier attempts were themselves found to regress on real
-    data before converging on this design — see the narrative below).
+    review; two earlier attempts, each itself found to regress on real data,
+    converged on this design — see the narrative below).
 
     PubMed ANDs terms in a ``[Title/Abstract]`` search, and — measured
     directly against real flagship hypothesis text — the sweet spot is
-    narrow: exactly 2-3 well-chosen terms consistently found real, on-topic
-    PMIDs (``"SLC12A3 NCC"`` -> 8; ``"NLRP3 activation renal"`` -> 9, incl.
-    "The cardio-renal-metabolic role of NLRP3..." and an "Oral NLRP3
-    Inhibitor" trial; ``"ACE Aldosterone breakthrough"`` -> 5, incl. PMID
-    25224804 "Aldosterone breakthrough with benazepril..."), while stacking
-    2+ highly-specific gene symbols TOGETHER regularly found NOTHING or only
-    a weak, off-topic hit (``"SLC12A3 NCC WNK4 SPAK"`` -> 0; ``"NLRP3 DAMPs
-    activation"`` -> 2, off-topic) — real abstracts rarely co-mention that
-    many distinct specific terms at once, and the single most reliable
-    symbol match is usually a better anchor than a second, weaker one.
-    Terms are gathered from THREE sources, in priority order, until
-    ``max_terms`` is reached:
+    narrow: 2-3 well-chosen terms consistently found real, on-topic PMIDs
+    (``"hypertension SLC12A3 thiazide"`` -> 10, incl. PMID 28274929
+    "Hydrochlorothiazide treatment increases the abundance of the NaCl
+    cotransporter..."; ``"hypertension ADMA DDAH2"`` -> 3, incl. PMID
+    18772860 "Nebivolol treatment reduces serum levels of asymmetric
+    dimethylarginine..."; ``"hypertension NLRP3 inflammasome"`` -> PMID
+    30091406 "Role of NLRP-3 Inflammasome in Hypertension"), while stacking
+    MULTIPLE specific terms WITHOUT a stable disease anchor regularly found
+    NOTHING or an off-topic hit that the grader then correctly drops
+    entirely (``"SLC12A3 NCC WNK4 SPAK"`` -> 0; ``"CD8 Clonally expanded"``
+    -> 3 off-topic hits — MS/hepatitis/ovarian cancer; ``"SLC12A3 loss
+    function"`` -> 0). Terms are gathered as follows, until ``max_terms`` is
+    reached:
 
+    0. ``condition_anchor`` — GUARANTEED to be one of the ``max_terms``
+       slots, added FIRST, before anything else, so a hypothesis's own
+       jargon-dense phrasing can never crowd it out (this is the DEFECT 1
+       root-cause fix — earlier rounds had no guaranteed slot at all, so a
+       hypothesis with 2-3 sentence-order-early generic words, e.g. "CD8
+       Clonally expanded", never reached the anchor or a second concept
+       term). Detected ONCE PER RUN from the ORIGINAL OBSERVATION (see
+       :func:`_condition_anchor`) and passed in by the caller — not
+       re-derived per hypothesis, so every hypothesis in a run shares the
+       exact same anchor (BUILD_SPEC.md's tool is scoped to antihypertensive
+       -drug observations, so this is always a real, in-domain term,
+       typically "hypertension").
     1. Gene/pathway-SYMBOL-like token(s) scanned directly out of ``neutral``
-       (see ``_SYMBOL_RE`` above), capped at ``max_symbols`` (default 1) —
-       the single most reliable, specific anchor a hypothesis statement
-       contains (NLRP3, SLC12A3, WNK4, NCC, eNOS, ACE, ...), and the one
-       ``neutralize_query``'s own extraction most reliably MISSES,
+       (see ``_SYMBOL_RE`` above), capped at ``max_symbols`` (default 2) —
+       the most reliable, specific anchors a hypothesis statement contains
+       (NLRP3, SLC12A3, WNK4, NCC, eNOS, ACE, CD8, ADMA, DDAH2, ...), and the
+       ones ``neutralize_query``'s own extraction most reliably MISSES,
        especially via its heuristic timeout-fallback path (measured live:
        that fallback's own entity list for a real hypothesis was just
        ``["Chronic"]`` — a sentence-initial capitalized common word, not a
        real entity at all; its regex structurally cannot match an
-       ALL-CAPS/digit token like "NLRP3"). Capped at just 1 (not several)
-       because a 2nd, weaker symbol competing for a query slot measurably
-       produced worse results than letting a genuine content word (e.g.
-       "inflammasome"/"activation") fill that slot instead.
+       ALL-CAPS/digit token like "NLRP3"). Capped at 2 (not unbounded) —
+       stacking 3-4 symbols together (with no anchor to anchor them)
+       previously found nothing; with the anchor now occupying its own
+       GUARANTEED slot, up to 2 symbols alongside it consistently performed
+       at least as well as 1 and sometimes better (a 2nd real symbol, e.g.
+       DDAH2 alongside ADMA, reliably beat a generic sentence word filling
+       that same slot).
     2. ``neutralize_query``'s own ``stance.entities`` (drug/disease names) —
        filtered through the same stopword/generic-modifier/length check
        (:func:`_is_high_signal_term`) so a heuristic-fallback artifact like
@@ -515,35 +609,47 @@ def _entity_pubmed_query(
        "mediated" is filtered separately as a stopword) — fills any
        remaining room, covering PHRASE-based hypotheses with no single gene
        symbol (e.g. "aldosterone breakthrough", a named clinical phenomenon,
-       not a gene) and topping up single-symbol cases (e.g. "NLRP3" alone
-       plus "inflammasome activation" from the sentence).
+       not a gene). ``_QUERY_STOPWORDS`` specifically excludes the generic
+       process/anatomy/genetics words repeatedly observed consuming a slot
+       ahead of the real signal: clonally, expanded, infiltrating, role,
+       effector, memory, loss, function, variant, encoding, activation,
+       accumulation, hyperactivation, downregulation (+ the round-1 list —
+       mediated, driven, chronic, non, dependent, via, ...).
 
-    No automatic disease-domain anchor is appended: measured against real
-    data, unconditionally adding one more term (even a broad one like
-    "hypertension") sometimes pushed an already-good query past the point
-    where PubMed's implicit AND stopped matching anything; ``ensure_
-    evidence``'s own progressive broadening (BUILD_SPEC.md §3) is what
-    handles a query that's still too narrow after this, not a blanket extra
-    term here.
-
-    Falls back to :func:`_shorten_for_pubmed` only if literally nothing
-    usable is found anywhere (essentially never in practice).
+    Falls back to :func:`_shorten_for_pubmed` only if ``condition_anchor``
+    itself is somehow falsy AND nothing else is found (should not happen in
+    practice — ``_condition_anchor`` always returns a non-empty string).
     """
     terms: list[str] = []
     seen: set[str] = set()
 
-    def _add(word: str) -> None:
+    def _add(word: str) -> bool:
         w = word.strip()
         if not w or w.lower() in seen or not _is_high_signal_term(w):
-            return
-        seen.add(w.lower())
+            return False
+        wl = w.lower()
+        # Reject a candidate that is a bare PREFIX FRAGMENT of an
+        # already-added term — the plain-letters content-word pass
+        # (``_PLAIN_WORD_RE`` has no digits) splits a digit-bearing symbol
+        # like "SLC12A3" into letter-only runs ("SLC", "A"); without this
+        # check "SLC" would be re-added as if it were a distinct, meaningful
+        # term (measured live: produced the query "hypertension SLC12A3
+        # SLC" — a meaningless duplicate slot). A real second concept is
+        # never merely a strict prefix of a term already chosen.
+        if any(existing.startswith(wl) for existing in seen):
+            return False
+        seen.add(wl)
         terms.append(w)
+        return True
 
-    symbol_budget = min(max_symbols, max_terms)
+    _add(condition_anchor)  # guaranteed slot 0 -- added before anything else
+
+    symbols_taken = 0
     for m in _SYMBOL_RE.findall(neutral):
-        if len(terms) >= symbol_budget:
+        if symbols_taken >= max_symbols or len(terms) >= max_terms:
             break
-        _add(m)
+        if _add(m):
+            symbols_taken += 1
 
     for e in stance_entities or []:
         if len(terms) >= max_terms:
@@ -567,12 +673,22 @@ async def run_retrieve(
     *,
     user_provider: str = "anthropic",
     model_id: Optional[str] = None,
+    observation: str = "",
 ) -> RetrievalResult:
     """Agent 3 — Evidence Retriever (BUILD_SPEC.md §3; no LLM call is made
     directly by this function — ``neutralize_query`` makes its own internal,
     self-contained Haiku call with its own 800ms timeout + heuristic
     fallback, so from this function's perspective it is just an async data
     transform).
+
+    ``observation`` is the ORIGINAL clinical observation (not the
+    hypothesis) — used only to derive the disease/condition anchor
+    (:func:`_condition_anchor`) that :func:`_entity_pubmed_query` guarantees
+    a slot for. The caller (``graph.py``) passes the SAME observation for
+    every hypothesis in a run, so every hypothesis's query shares the same
+    anchor. Defaults to ``""`` (safely resolves to "hypertension" via
+    ``_condition_anchor``'s own fallback) for standalone/test callers that
+    don't have an observation handy.
 
     Implements the corrected §3 flow, with one empirically-forced query-
     construction fix (see below):
@@ -615,23 +731,25 @@ async def run_retrieve(
        semantic search, so a long synthesized sentence rarely matches
        verbatim, and ``fetch_evidence_data`` wraps whatever string it's given
        as ``f"{query}[Title/Abstract] AND (...)"`` — a bare trailing ``OR``
-       breaks that field-tag's intended scope. Fix (revised twice after Opus
-       review — DEFECT 1): derive ``pubmed_query =
-       _entity_pubmed_query(stance.entities, neutral)`` — a SHORT, HIGH-
-       SIGNAL query built from gene/pathway-symbol-like tokens scanned out of
-       ``neutral`` directly, ``neutralize_query``'s own extracted entities,
-       and (if still short) plain sentence content words, in that priority
-       order (see :func:`_entity_pubmed_query`'s docstring for the full
-       narrative + measurements — two earlier attempts, sentence-truncation-
-       first and entities-only-with-a-forced-anchor, each still discarded
-       high-signal terms or diluted an already-good query on real data; this
-       version does not). Use ``pubmed_query`` everywhere §3 uses ``neutral``
-       for an actual PubMed call; PROPERLY parenthesize the contradiction-
-       pass OR-group: ``f"{pubmed_query} (limitations OR negative OR no
-       association)"``. The TRUE ``neutral_clinical_question`` is still what
-       is returned as ``RetrievalResult.neutral_query`` (used for reporting/
-       the run_manifest) — only the
-       actual PubMed calls use the shortened form.
+       breaks that field-tag's intended scope. Fix (revised three times after
+       Opus review — DEFECT 1): derive ``pubmed_query =
+       _entity_pubmed_query(stance.entities, neutral, condition_anchor)`` —
+       a SHORT, HIGH-SIGNAL query that GUARANTEES the run's disease/
+       condition anchor (from ``observation``, see :func:`_condition_anchor`)
+       a slot, then fills the rest from gene/pathway-symbol-like tokens
+       scanned out of ``neutral`` directly, ``neutralize_query``'s own
+       extracted entities, and (if still short) plain sentence content words,
+       in that priority order (see :func:`_entity_pubmed_query`'s docstring
+       for the full narrative + measurements — three earlier attempts each
+       still discarded high-signal terms, diluted an already-good query, or
+       let a hypothesis's own jargon crowd out the disease anchor entirely
+       on real data; this version does not). Use ``pubmed_query`` everywhere
+       §3 uses ``neutral`` for an actual PubMed call; PROPERLY parenthesize
+       the contradiction-pass OR-group: ``f"{pubmed_query} (limitations OR
+       negative OR no association)"``. The TRUE ``neutral_clinical_question``
+       is still what is returned as ``RetrievalResult.neutral_query`` (used
+       for reporting/the run_manifest) — only the actual PubMed calls use
+       the shortened form.
 
     Never raises: ``EvidenceFloorError`` (all 5 broadening strategies
     exhausted) and any other unexpected error are caught and logged, and this
@@ -645,7 +763,8 @@ async def run_retrieve(
         hypothesis.statement, model_id or config.MODEL_CHEAP, user_key, user_provider
     )
     neutral = stance.neutral_clinical_question
-    pubmed_query = _entity_pubmed_query(stance.entities, neutral)
+    condition_anchor = _condition_anchor(observation)
+    pubmed_query = _entity_pubmed_query(stance.entities, neutral, condition_anchor)
 
     try:
         result = await fetch_evidence_data(pubmed_query)

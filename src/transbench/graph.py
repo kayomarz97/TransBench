@@ -112,6 +112,7 @@ async def _retrieve_and_grade_node(state: TransBenchState) -> TransBenchState:
     that gracefully) — this node does not add extra error handling on top.
     """
     hypotheses = state.get("hypotheses", [])
+    observation = state["observation"]
     user_key = state.get("user_key")
     user_provider = state.get("user_provider", "anthropic")
     model_cheap = state.get("model_cheap", config.MODEL_CHEAP)
@@ -121,7 +122,11 @@ async def _retrieve_and_grade_node(state: TransBenchState) -> TransBenchState:
     async def _one(hypothesis: Hypothesis) -> tuple[str, list[EvidenceItem], dict]:
         async with semaphore:
             retrieval = await agents.run_retrieve(
-                hypothesis, user_key, user_provider=user_provider, model_id=model_cheap
+                hypothesis,
+                user_key,
+                user_provider=user_provider,
+                model_id=model_cheap,
+                observation=observation,
             )
             evidence = await agents.run_grade(
                 hypothesis,
