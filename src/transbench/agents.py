@@ -3,11 +3,17 @@
 Retriever — no LLM; Evidence Grader — Haiku, batched). Phase 4 added agents
 5-6 (Novelty Checker, Rigor Gate — in ``rigor.py``, which reuses this
 module's ``build_llm``/``_ainvoke_json``/``_coerce_list``/
-``_normalize_enum_field`` helpers). Phase 5 (this file, today) adds agents
-7-8 (Experiment Designer, Brief Assembler) and two supporting pieces
-BUILD_SPEC.md §9 requires: per-run token-spend accounting
-(:func:`token_spend_session` / :func:`current_token_spend`) and retrieval
--snapshot REPLAY (:func:`run_retrieve`'s ``retrieval_snapshot`` kwarg).
+``_normalize_enum_field`` helpers). Phase 5 adds agents 7-8 (Experiment
+Designer, Brief Assembler) and two supporting pieces BUILD_SPEC.md §9
+requires: per-run token-spend accounting (:func:`token_spend_session` /
+:func:`current_token_spend`) and retrieval-snapshot REPLAY
+(:func:`run_retrieve`'s ``retrieval_snapshot`` kwarg). Post-Phase-5 (Opus
+verification finding): agent 7 (:func:`run_design_experiment`) now VERIFIES
+a named dataset's REAL content (not just that its URL resolves to A record —
+confirmed live, twice, that a host-only check lets a real-but-topically
+-unrelated accession through) before ever accepting it — see
+:func:`_verify_dataset_pointer`'s module comment for the two confirmed-live
+mismatches that motivated this.
 
 Agents 1-2 follow the shape ``async run_<name>(payload: dict, llm) -> ...``
 (BUILD_SPEC.md §5), taking a PRE-BUILT, temperature-0-bound client. Agents 3-4
@@ -24,6 +30,7 @@ since assembly needs many upstream pieces (axes, graded hypotheses, per
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import datetime as _dt
@@ -34,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, get_args
 from urllib.parse import urlsplit
 
+import httpx
 import json_repair
 from fastapi import HTTPException
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -1302,10 +1310,252 @@ def _is_recognized_dataset_pointer(url: Any) -> bool:
 
 _FALLBACK_FEASIBILITY_NOTE = (
     "Fell back to the pinned default substrate (Tabula Sapiens immune "
-    "compartment) because the proposed dataset was empty or its pointer was "
-    "not a well-formed https URL to a recognized public dataset host "
-    "(BUILD_SPEC.md §5: never emit a fabricated/guessed accession)."
+    "compartment) because the proposed dataset could not be verified to "
+    "actually BE the dataset it claimed to be (BUILD_SPEC.md §5: never emit "
+    "a fabricated/guessed accession; Phase 5/7 verify dataset_pointer "
+    "actually resolves to a matching dataset, not merely to *a* record)."
 )
+
+# ---------------------------------------------------------------------------
+# Dataset CONTENT verification (Opus verification finding, post-Phase-5-v1):
+# a host-only / reachability-only check is NOT enough -- an accession can
+# resolve (HTTP 200, recognized host) while describing a COMPLETELY
+# DIFFERENT dataset than what the plan claims. Confirmed live, TWICE,
+# independently: this repo's own earlier flagship run named GSE200257 as
+# "Bulk RNA-seq of human adrenal cortex tissue... aldosterone-producing
+# adenomas" when the REAL record is "Single-cell RNA-sequencing of blood and
+# tonsillar CD4+ CD57+ and CD57- T cells"; Opus's verifier run named
+# GSE200827 as "KPMP human kidney single-nucleus RNA-seq, ~50 donors, CKD
+# 1-5" when the REAL record is "Gene expression profiles during the process
+# of differentiation of HL-60 [leukemia] cells into neutrophils or
+# eosinophils" (an expression-microarray SuperSeries, 16 samples). Neither
+# was caught by a host-only check because both accessions genuinely
+# resolve, on a genuinely recognized host. This section fetches the REAL GEO
+# record and checks it is actually consistent with what the plan claims
+# before ever accepting a model-named accession.
+# ---------------------------------------------------------------------------
+
+_GEO_ACCESSION_RE = re.compile(r"\bGSE\d+\b", re.IGNORECASE)
+_GEO_SOFT_FIELD_RE = re.compile(r"^!(\w+)\s*=\s*(.*)$")
+_GEO_QUICK_VIEW_URL = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={acc}&targ=self&form=text&view=quick"
+_GEO_FETCH_TIMEOUT = 10.0  # seconds -- bounded so a slow/hung NCBI call can never stall a run indefinitely
+
+
+def _extract_geo_accession(dataset: str, dataset_pointer: str) -> Optional[str]:
+    """Pulls a GSEnnn... accession out of ``dataset_pointer`` (preferred --
+    it's the URL that will actually be used) or, failing that, ``dataset``
+    (a model occasionally names the accession only in the dataset string).
+    Returns ``None`` if neither contains a recognizable GEO Series accession
+    (e.g. a CELLxGENE/Tabula Sapiens/ArrayExpress/DOI pointer -- full content
+    verification for those hosts is out of scope here; see
+    :func:`_verify_dataset_pointer`'s docstring for the documented scope
+    boundary).
+    """
+    for text in (dataset_pointer, dataset):
+        m = _GEO_ACCESSION_RE.search(text or "")
+        if m:
+            return m.group(0).upper()
+    return None
+
+
+def _parse_geo_soft_text(text: str) -> Optional[dict[str, list[str]]]:
+    """Parses GEO SOFT ``!Field = value`` lines into ``{field: [values...]}``
+    (a field, e.g. ``Series_overall_design`` or ``Series_type``, can
+    legitimately repeat across multiple lines -- confirmed live for both).
+    Returns ``None`` (unresolved) if the text carries no ``Series_title`` at
+    all -- the confirmed-live signature of NCBI's HTML "GEO Accession
+    viewer" error page for an accession that does not exist (status 200,
+    but no SOFT fields at all), as opposed to a real record (which always
+    has this field).
+    """
+    fields: dict[str, list[str]] = {}
+    for line in (text or "").splitlines():
+        m = _GEO_SOFT_FIELD_RE.match(line.strip())
+        if m:
+            fields.setdefault(m.group(1), []).append(m.group(2).strip())
+    if not fields.get("Series_title"):
+        return None
+    return fields
+
+
+async def _fetch_geo_soft_record(accession: str) -> Optional[dict[str, list[str]]]:
+    """Fetches + parses the REAL GEO SOFT quick-view text record for
+    ``accession`` -- a plain, unauthenticated NCBI GET (NOT an Iatronix
+    call; this repo's own httpx dependency, per BUILD_SPEC.md §1). Appends
+    ``config.PUBMED_API_KEY`` as ``&api_key=`` when set (raises NCBI rate
+    limits; harmless no-op if this specific endpoint ignores it).
+
+    Retries EXACTLY ONCE on a transient-looking failure (timeout/connection
+    error) -- matching this codebase's established "transient infra blips
+    get one retry, not silent unlimited retries, not zero retries either"
+    philosophy (mirrors the test-level Anthropic-500 retry-once pattern) --
+    then gives up and returns ``None``. Never raises: an unverifiable
+    dataset is treated exactly like a confirmed-nonexistent one and falls
+    back to the guaranteed-safe pinned default, which is the conservative,
+    correct choice for a "never fabricate/mismatch" safety gate (better to
+    over-trigger the safe fallback on a flaky NCBI blip than to ever accept
+    an unverified accession).
+    """
+    url = _GEO_QUICK_VIEW_URL.format(acc=accession)
+    if config.PUBMED_API_KEY:
+        url += f"&api_key={config.PUBMED_API_KEY}"
+
+    last_exc: Optional[BaseException] = None
+    for attempt in range(2):  # 1 try + 1 retry
+        try:
+            async with httpx.AsyncClient(timeout=_GEO_FETCH_TIMEOUT) as client:
+                response = await client.get(url)
+            if response.status_code != 200:
+                logger.warning("design_experiment: GEO fetch for %s returned HTTP %s", accession, response.status_code)
+                return None  # a real HTTP error status is not transient -- do not retry
+            return _parse_geo_soft_text(response.text)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last_exc = exc
+            if attempt == 0:
+                await asyncio.sleep(0.5)
+    logger.warning("design_experiment: GEO fetch for %s failed after retry: %s", accession, last_exc)
+    return None
+
+
+# Generic English/omics-boilerplate words filtered out before computing
+# keyword overlap -- without this, "human gene expression profiling" alone
+# would spuriously "match" ANY two unrelated GEO records, defeating the
+# whole check. Calibrated against REAL fetched records: a true positive
+# (GSE121862/kidney) and two confirmed-live true negatives (GSE200257/
+# T-cells claimed-as-adrenal, GSE200827/HL-60 claimed-as-kidney) -- see
+# tests/test_experiment_phase5.py.
+_GEO_GENERIC_WORDS = frozenset(
+    {
+        "a", "an", "the", "and", "or", "but", "nor", "so", "yet", "as", "at", "by",
+        "for", "from", "in", "into", "of", "on", "to", "with", "within", "across",
+        "among", "between", "this", "that", "these", "those", "is", "are", "was",
+        "were", "be", "been", "being", "has", "have", "had", "will", "would", "can",
+        "could", "may", "might", "must", "shall", "should", "not", "no", "all",
+        "each", "both", "either", "neither", "via", "using", "used", "based", "than",
+        "human", "humans", "homo", "sapiens", "sapien", "gene", "genes", "genetic",
+        "genomic", "genomics", "expression", "expressed", "profiling", "profile",
+        "profiles", "analysis", "analyses", "study", "studies", "data", "dataset",
+        "datasets", "sample", "samples", "sampling", "cell", "cells", "cellular",
+        "tissue", "tissues", "sequencing", "sequence", "sequenced", "seq", "rna",
+        "dna", "high", "throughput", "level", "levels", "type", "types", "series",
+        "single", "bulk", "model", "models", "method", "methods", "approach",
+        "result", "results", "experiment", "experiments", "experimental",
+        "molecular", "biological", "clinical", "patient", "patients", "disease",
+        "diseases", "condition", "conditions", "health", "healthy", "normal",
+        "control", "controls", "group", "groups", "comparison", "compared",
+        "differential", "differentially", "identify", "identified",
+        "identification", "reveal", "revealed", "demonstrate", "demonstrated",
+        "provide", "provides", "understand", "understanding", "publicly",
+        "available", "public", "accession", "atlas", "cohort", "donor", "donors",
+    }
+)
+_GEO_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9\-]{2,}")
+
+
+def _geo_content_words(text: str) -> set[str]:
+    return {w.lower() for w in _GEO_WORD_RE.findall(text or "") if w.lower() not in _GEO_GENERIC_WORDS}
+
+
+_MIN_SHARED_KEYWORDS = 2
+_MIN_SHARED_KEYWORD_RATIO = 0.15
+
+
+def _verify_geo_record_matches_claim(record: dict[str, list[str]], claimed_text: str) -> tuple[bool, str]:
+    """Checks the REAL GEO record against what the plan CLAIMED about it.
+
+    (a) Organism: at least one of ``Series_platform_organism``/
+        ``Series_sample_organism`` (or, defensively, ANY field at all) must
+        mention "Homo sapien[s]" (case-insensitive substring -- covers a
+        genuine "Homo sapien" truncation observed live in one real record).
+    (b) Keyword overlap: content words (English/omics-boilerplate filtered,
+        :func:`_geo_content_words`) shared between ``claimed_text`` and the
+        record's ``Series_title``/``Series_summary``/``Series_overall_
+        design``/``Series_type`` must clear BOTH an absolute floor
+        (:data:`_MIN_SHARED_KEYWORDS`) and a floor relative to how much
+        claimed text there was (:data:`_MIN_SHARED_KEYWORD_RATIO`) -- cheap,
+        explainable, and calibrated against real fetched records to catch
+        an egregious organ/topic mismatch (e.g. a claimed kidney dataset
+        that is really an HL-60 leukemia-cell-line microarray, or a claimed
+        adrenal-cortex dataset that is really a T-cell immunology dataset)
+        without requiring exact wording.
+
+    Returns ``(True, "")`` if both pass, else ``(False, <human-readable
+    reason, includes the real title for feasibility_notes/logging>)``.
+    """
+    organism_fields = record.get("Series_platform_organism", []) + record.get("Series_sample_organism", [])
+    organism_text = " ".join(organism_fields) or " ".join(v for values in record.values() for v in values)
+    if "homo sapien" not in organism_text.lower():
+        real_title = (record.get("Series_title") or [""])[0]
+        return False, f"organism could not be confirmed human (real record: {real_title!r})"
+
+    real_text = " ".join(
+        record.get("Series_title", [])
+        + record.get("Series_summary", [])
+        + record.get("Series_overall_design", [])
+        + record.get("Series_type", [])
+    )
+    claimed_words = _geo_content_words(claimed_text)
+    real_words = _geo_content_words(real_text)
+    shared = claimed_words & real_words
+    ratio = len(shared) / max(1, len(claimed_words))
+    if len(shared) < _MIN_SHARED_KEYWORDS or ratio < _MIN_SHARED_KEYWORD_RATIO:
+        real_title = (record.get("Series_title") or [""])[0]
+        return False, (
+            f"claimed dataset content does not match the real GEO record "
+            f"(real title: {real_title!r}; shared keywords: {sorted(shared) or 'none'})"
+        )
+    return True, ""
+
+
+async def _verify_dataset_pointer(dataset: str, dataset_pointer: Any, claimed_text: str) -> tuple[bool, str]:
+    """The main verify-then-fallback gate for agent 7 (Opus verification
+    finding, post-Phase-5-v1): checks not just that ``dataset_pointer`` is a
+    well-formed URL to a recognized host (:func:`_is_recognized_dataset_
+    pointer`, a fast pre-filter) but that it actually RESOLVES to a REAL
+    record consistent with what the plan claims about it.
+
+    GEO accessions (the common case -- BUILD_SPEC.md's own preferred
+    example, and what this tool's flagship scenarios have converged on
+    live) get FULL content verification via :func:`_fetch_geo_soft_record` +
+    :func:`_verify_geo_record_matches_claim`.
+
+    Non-GEO recognized hosts (CELLxGENE/Tabula Sapiens/ArrayExpress/DOI) get
+    a bounded, DELIBERATELY LIGHTER reachability-only check (a plain HTTP GET
+    that must return 200 with a non-trivial body). This repo has no per-host
+    content-metadata parser for those APIs (a documented scope boundary, not
+    an oversight) -- a live-reachable, recognized-host URL is the best
+    available signal there.
+
+    Returns ``(True, "")`` if verified, else ``(False, <human-readable
+    reason>)``. Never raises -- any unexpected error is treated as
+    "unverified" (fails closed, triggering the guaranteed-safe fallback).
+    """
+    if not dataset or not _is_recognized_dataset_pointer(dataset_pointer):
+        return False, "dataset_pointer was missing or not a well-formed https URL to a recognized public dataset host"
+    pointer = str(dataset_pointer).strip()
+
+    accession = _extract_geo_accession(dataset, pointer)
+    if accession is not None:
+        record = await _fetch_geo_soft_record(accession)
+        if record is None:
+            return False, f"GEO accession {accession} does not resolve to a real record"
+        return _verify_geo_record_matches_claim(record, claimed_text)
+
+    # Non-GEO recognized host: reachability-only (see docstring scope note).
+    last_exc: Optional[BaseException] = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=_GEO_FETCH_TIMEOUT, follow_redirects=True) as client:
+                response = await client.get(pointer)
+            if response.status_code == 200 and len(response.content) > 0:
+                return True, ""
+            return False, f"dataset_pointer returned HTTP {response.status_code}"
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last_exc = exc
+            if attempt == 0:
+                await asyncio.sleep(0.5)
+    return False, f"dataset_pointer was unreachable: {last_exc}"
+
 
 # BUILD_SPEC.md §5's own VERBATIM Experiment Designer prompt text (frozen,
 # reproduced character-for-character in EXPERIMENT_DESIGNER_SYSTEM_PROMPT)
@@ -1333,63 +1583,19 @@ def _first_present_str(item: dict, keys: tuple[str, ...]) -> str:
     return ""
 
 
-async def run_design_experiment(candidate: Hypothesis, evidence: list[EvidenceItem], llm) -> ExperimentPlan:
-    """Agent 7 — Experiment Designer (BUILD_SPEC.md §5, §8;
-    ``EXPERIMENT_DESIGNER_SYSTEM_PROMPT``). ONE Sonnet call designing a
-    single computational experiment to confirm/refute ``candidate`` — the
-    hypothesis :func:`transbench.rigor.select_experiment_candidate` already
-    picked (already ``open_question`` AND ``grounded``; this function is only
-    ever invoked by the caller for an ELIGIBLE candidate — BUILD_SPEC.md §5
-    agent 7: "for the top open_question+grounded hypothesis" — it does not
-    re-check eligibility itself).
-
-    Only ``entailment=="supports"`` items from ``evidence`` are shown to the
-    model — the grounded evidence that actually motivated this candidate's
-    eligibility (contradicting/unclear items are legitimate context for
-    grading/novelty, but showing them here would invite the model to hedge
-    or design around evidence that isn't what grounded this hypothesis).
-
-    Framing (BUILD_SPEC.md §0.5 / this task): the prompt already forbids
-    clinical claims/wet-lab-only designs; this function adds no patient
-    -directed language of its own — ``question``/``confirm_if``/
-    ``refute_if`` are always about the EXPERIMENTAL criterion (does the data
-    confirm or refute the mechanistic claim), never a recommendation to
-    treat, prescribe, or act on any specific patient.
-
-    Grounding rule for datasets (BUILD_SPEC.md §5/§8), enforced in CODE, not
-    only requested in the prompt: if the model's own ``dataset`` is empty,
-    or ``dataset_pointer`` is not a well-formed ``https`` URL to a
-    recognized public dataset host (:func:`_is_recognized_dataset_pointer`),
-    this function OVERRIDES both fields with the pinned default substrate
-    (``config.DEFAULT_DATASET`` / ``config.DEFAULT_DATASET_POINTER`` — a
-    real, versioned, publicly downloadable human single-cell atlas,
-    guaranteed to resolve) and appends :data:`_FALLBACK_FEASIBILITY_NOTE` to
-    ``feasibility_notes`` — exactly BUILD_SPEC.md's "never fabricate/guess
-    an accession ... fall back ... and say so in feasibility_notes" rule,
-    guaranteed structurally rather than left to the model's own judgment
-    alone. This can NEVER produce an unresolvable ``dataset_pointer``:
-    either the model's own is recognized-host-shaped, or the
-    guaranteed-resolvable pinned default is substituted.
-
-    ``ExperimentPlan`` (BUILD_SPEC.md §4, frozen) has no ``Literal``/enum
-    -valued field, so ``_normalize_enum_field`` has nothing to normalize for
-    this agent's output (checked against the schema directly — this is a
-    deliberate no-op, not an oversight).
-
-    ``hypothesis_id`` in the returned ``ExperimentPlan`` is ALWAYS
-    ``candidate.id`` — never trusted from the model's own JSON echo (the
-    same "never trust an id round-tripped through free-form generation"
-    discipline ``run_grade``/``rigor.run_entailment`` already apply to
-    citation ids).
-
-    Raises :class:`TransBenchLLMError` if the response is missing any other
-    required field (``question``/``method``/``protocol_steps``/
-    ``confirm_if``/``refute_if``/``claude_science_prompt``) even after the
-    dataset fallback AND the ``question``/:data:`_QUESTION_FALLBACK_KEYS`
-    synonym fallback are both applied — unlike ``run_assemble``'s cosmetic
-    ``uncertainty_note``, a genuinely broken experiment design must surface
-    loudly (this is the tool's "money moment" output, BUILD_SPEC.md §8), not
-    be silently patched over.
+def _design_experiment_user_content(
+    candidate: Hypothesis,
+    evidence: list[EvidenceItem],
+    *,
+    force_tabula_sapiens: bool,
+    rejection_reason: str = "",
+) -> str:
+    """Builds agent 7's per-call user content. Shared by the model's free
+    -choice attempt (``force_tabula_sapiens=False``) and the Tabula-Sapiens
+    -LOCKED retry (``force_tabula_sapiens=True``) that :func:`run_design_
+    experiment` makes when the free-choice attempt's dataset is rejected
+    (either structurally unrecognized, or content-verified to be a
+    MISMATCH) -- see that function's docstring for the full flow.
     """
     lines = [
         f"Hypothesis id: {candidate.id}",
@@ -1406,11 +1612,28 @@ async def run_design_experiment(candidate: Hypothesis, evidence: list[EvidenceIt
             lines.append(f"- id={cite} grade={ev.grade}: {ev.claim_fragment}")
     else:
         lines.append("No supporting evidence items were provided (design conservatively).")
-    lines.append(
-        f"Pinned default fallback substrate — use verbatim as dataset/dataset_pointer if you "
-        f"are not certain another named accession/atlas actually resolves: "
-        f"dataset={config.DEFAULT_DATASET!r}, dataset_pointer={config.DEFAULT_DATASET_POINTER!r}."
-    )
+
+    if force_tabula_sapiens:
+        lines.append(
+            f"IMPORTANT: a dataset you previously proposed for this SAME hypothesis was "
+            f"REJECTED because {rejection_reason}. For THIS response you MUST use the "
+            f"pinned default substrate verbatim — do not propose any other dataset or "
+            f"accession: dataset={config.DEFAULT_DATASET!r}, dataset_pointer="
+            f"{config.DEFAULT_DATASET_POINTER!r}. Tabula Sapiens is a whole-body human "
+            f"single-cell atlas spanning many compartments (kidney, immune, vascular, "
+            f"endocrine, and others) — name the SPECIFIC compartment/cell-type population "
+            f"within Tabula Sapiens most relevant to this hypothesis, and design "
+            f"method/protocol_steps/confirm_if/refute_if/claude_science_prompt entirely "
+            f"around analyzing that compartment of Tabula Sapiens. Never reference the "
+            f"rejected dataset anywhere in your response."
+        )
+    else:
+        lines.append(
+            f"Pinned default fallback substrate — use verbatim as dataset/dataset_pointer if "
+            f"you are not certain another named accession/atlas actually resolves AND "
+            f"matches its own claimed content: dataset={config.DEFAULT_DATASET!r}, "
+            f"dataset_pointer={config.DEFAULT_DATASET_POINTER!r}."
+        )
     lines.append(f"Set \"hypothesis_id\" to exactly {candidate.id!r} in your JSON output.")
     # Defense-in-depth (this is per-call USER content, not the frozen system
     # prompt): spells out every required JSON key by name. The system
@@ -1426,70 +1649,208 @@ async def run_design_experiment(candidate: Hypothesis, evidence: list[EvidenceIt
         '"protocol_steps", "confirm_if", "refute_if", "feasibility_notes", '
         '"claude_science_prompt".'
     )
-    user_content = "\n".join(lines)
+    return "\n".join(lines)
 
-    parsed = await _ainvoke_json(llm, EXPERIMENT_DESIGNER_SYSTEM_PROMPT, user_content)
-    item = _coerce_dict(parsed, preferred_key="ExperimentPlan")
 
-    dataset = str(item.get("dataset") or "").strip()
-    dataset_pointer = item.get("dataset_pointer")
-    feasibility_notes = str(item.get("feasibility_notes") or "").strip()
-
-    if not dataset or not _is_recognized_dataset_pointer(dataset_pointer):
-        logger.info(
-            "design_experiment: falling back to the pinned default dataset for hypothesis %s "
-            "(model proposed dataset=%r dataset_pointer=%r)",
-            candidate.id,
-            dataset or None,
-            dataset_pointer,
-        )
-        dataset = config.DEFAULT_DATASET
-        dataset_pointer = config.DEFAULT_DATASET_POINTER
-        feasibility_notes = f"{feasibility_notes} {_FALLBACK_FEASIBILITY_NOTE}".strip()
-    else:
-        dataset_pointer = str(dataset_pointer).strip()
-
+def _parse_design_experiment_fields(item: dict) -> dict[str, Any]:
+    """Extracts + normalizes the ExperimentPlan-shaped fields out of ONE
+    parsed LLM response dict -- shared by the free-choice attempt and the
+    Tabula-Sapiens-locked retry in :func:`run_design_experiment`, so both go
+    through identical extraction logic. Returns a plain dict (not yet an
+    ``ExperimentPlan``) keyed exactly by the schema's own field names, plus
+    ``dataset_description`` (an extra, non-schema field observed live --
+    some models add it; harmless, and useful signal for dataset-content
+    verification, see :func:`run_design_experiment`).
+    """
     protocol_steps_raw = item.get("protocol_steps")
     protocol_steps = (
         [str(s).strip() for s in protocol_steps_raw if str(s).strip()]
         if isinstance(protocol_steps_raw, list)
         else []
     )
+    return {
+        "dataset": str(item.get("dataset") or "").strip(),
+        "dataset_pointer": item.get("dataset_pointer"),
+        "dataset_description": str(item.get("dataset_description") or "").strip(),
+        "feasibility_notes": str(item.get("feasibility_notes") or "").strip(),
+        "question": _first_present_str(item, _QUESTION_FALLBACK_KEYS),
+        "method": str(item.get("method") or "").strip(),
+        "protocol_steps": protocol_steps,
+        "confirm_if": str(item.get("confirm_if") or "").strip(),
+        "refute_if": str(item.get("refute_if") or "").strip(),
+        "claude_science_prompt": str(item.get("claude_science_prompt") or "").strip(),
+    }
 
-    question = _first_present_str(item, _QUESTION_FALLBACK_KEYS)
-    method = str(item.get("method") or "").strip()
-    confirm_if = str(item.get("confirm_if") or "").strip()
-    refute_if = str(item.get("refute_if") or "").strip()
-    claude_science_prompt = str(item.get("claude_science_prompt") or "").strip()
+
+async def run_design_experiment(candidate: Hypothesis, evidence: list[EvidenceItem], llm) -> ExperimentPlan:
+    """Agent 7 — Experiment Designer (BUILD_SPEC.md §5, §8;
+    ``EXPERIMENT_DESIGNER_SYSTEM_PROMPT``). Designs a single computational
+    experiment to confirm/refute ``candidate`` — the hypothesis
+    :func:`transbench.rigor.select_experiment_candidate` already picked
+    (already ``open_question`` AND ``grounded``; this function is only ever
+    invoked by the caller for an ELIGIBLE candidate — BUILD_SPEC.md §5 agent
+    7: "for the top open_question+grounded hypothesis" — it does not
+    re-check eligibility itself).
+
+    Only ``entailment=="supports"`` items from ``evidence`` are shown to the
+    model — the grounded evidence that actually motivated this candidate's
+    eligibility (contradicting/unclear items are legitimate context for
+    grading/novelty, but showing them here would invite the model to hedge
+    or design around evidence that isn't what grounded this hypothesis).
+
+    Framing (BUILD_SPEC.md §0.5 / this task): the prompt already forbids
+    clinical claims/wet-lab-only designs; this function adds no patient
+    -directed language of its own — ``question``/``confirm_if``/
+    ``refute_if`` are always about the EXPERIMENTAL criterion (does the data
+    confirm or refute the mechanistic claim), never a recommendation to
+    treat, prescribe, or act on any specific patient.
+
+    Verify-then-fallback for datasets (BUILD_SPEC.md §5/§8, Opus
+    verification finding — a host-only check is NOT enough, see
+    :func:`_verify_dataset_pointer`'s module comment for the two confirmed
+    -live mismatches that motivated this): makes ONE free-choice Sonnet
+    call, then:
+      1. If ``dataset`` is empty or ``dataset_pointer`` fails the fast
+         structural pre-filter (:func:`_is_recognized_dataset_pointer`) —
+         REJECT immediately, no network call needed.
+      2. Else, ``await`` :func:`_verify_dataset_pointer` — for a GEO
+         accession, fetches the REAL record and checks it is actually
+         consistent with what the plan claims (organism + keyword overlap);
+         for a non-GEO recognized host, a reachability-only check (see that
+         function's documented scope boundary).
+      3. If EITHER check rejects, makes a SECOND Sonnet call with
+         ``force_tabula_sapiens=True`` (:func:`_design_experiment_user_
+         content`) — explicitly told the prior dataset was rejected (and
+         why) and REQUIRED to use the pinned default, asked to name the
+         MOST RELEVANT Tabula Sapiens compartment for this hypothesis and
+         design method/protocol_steps/confirm_if/refute_if/claude_science_
+         prompt entirely around it. ``dataset``/``dataset_pointer`` are then
+         HARD-OVERRIDDEN to ``config.DEFAULT_DATASET``/``config.
+         DEFAULT_DATASET_POINTER`` regardless of what this retry itself
+         returns for those two fields specifically — the retry is NEVER
+         trusted a second time to name its own accession, only to write a
+         coherent, hypothesis-tailored protocol around the pinned,
+         guaranteed-resolvable substrate. This is how the rejected
+         accession can never leak into the FINAL ``claude_science_prompt``/
+         ``protocol_steps``/``method`` (the prior version of this function
+         only rewrote ``dataset``/``dataset_pointer``/``feasibility_notes``
+         on fallback, silently leaving stale, now-wrong accession-specific
+         protocol text behind — fixed here).
+
+    This can NEVER produce an unverified ``dataset_pointer``: either the
+    model's own is independently confirmed to both resolve AND match its
+    claimed content, or the guaranteed-resolvable pinned default is used
+    (and everything else rewritten to match it).
+
+    ``ExperimentPlan`` (BUILD_SPEC.md §4, frozen) has no ``Literal``/enum
+    -valued field, so ``_normalize_enum_field`` has nothing to normalize for
+    this agent's output (checked against the schema directly — this is a
+    deliberate no-op, not an oversight).
+
+    ``hypothesis_id`` in the returned ``ExperimentPlan`` is ALWAYS
+    ``candidate.id`` — never trusted from the model's own JSON echo (the
+    same "never trust an id round-tripped through free-form generation"
+    discipline ``run_grade``/``rigor.run_entailment`` already apply to
+    citation ids).
+
+    Raises :class:`TransBenchLLMError` if the (possibly-retried) response is
+    missing any other required field (``question``/``method``/
+    ``protocol_steps``/``confirm_if``/``refute_if``/``claude_science_
+    prompt``) — unlike ``run_assemble``'s cosmetic ``uncertainty_note``, a
+    genuinely broken experiment design must surface loudly (this is the
+    tool's "money moment" output, BUILD_SPEC.md §8), not be silently patched
+    over.
+    """
+    user_content = _design_experiment_user_content(candidate, evidence, force_tabula_sapiens=False)
+    parsed = await _ainvoke_json(llm, EXPERIMENT_DESIGNER_SYSTEM_PROMPT, user_content)
+    item = _coerce_dict(parsed, preferred_key="ExperimentPlan")
+    fields = _parse_design_experiment_fields(item)
+
+    rejection_reason: Optional[str] = None
+    if not fields["dataset"] or not _is_recognized_dataset_pointer(fields["dataset_pointer"]):
+        rejection_reason = (
+            "its dataset_pointer was missing or not a well-formed https URL to a "
+            "recognized public dataset host"
+        )
+    else:
+        claimed_text = " ".join(
+            filter(
+                None,
+                [
+                    fields["dataset"],
+                    fields["dataset_description"],
+                    fields["method"],
+                    fields["feasibility_notes"],
+                    fields["question"],
+                    candidate.statement,
+                    candidate.prediction,
+                ],
+            )
+        )
+        verified, reason = await _verify_dataset_pointer(
+            fields["dataset"], fields["dataset_pointer"], claimed_text
+        )
+        if not verified:
+            rejection_reason = reason
+
+    if rejection_reason is not None:
+        logger.warning(
+            "design_experiment: rejecting model-proposed dataset for hypothesis %s "
+            "(dataset=%r dataset_pointer=%r): %s -- retrying with the pinned default "
+            "substrate forced",
+            candidate.id,
+            fields["dataset"] or None,
+            fields["dataset_pointer"],
+            rejection_reason,
+        )
+        retry_user_content = _design_experiment_user_content(
+            candidate, evidence, force_tabula_sapiens=True, rejection_reason=rejection_reason
+        )
+        retry_parsed = await _ainvoke_json(llm, EXPERIMENT_DESIGNER_SYSTEM_PROMPT, retry_user_content)
+        retry_item = _coerce_dict(retry_parsed, preferred_key="ExperimentPlan")
+        fields = _parse_design_experiment_fields(retry_item)
+        # HARD-enforced regardless of what the retry itself returns for
+        # these two fields -- the whole point is to NEVER trust a second
+        # unverified guess; only the pinned, guaranteed-resolvable default
+        # is ever used once the free-choice attempt has been rejected.
+        fields["dataset"] = config.DEFAULT_DATASET
+        fields["dataset_pointer"] = config.DEFAULT_DATASET_POINTER
+        fields["feasibility_notes"] = (
+            f"{fields['feasibility_notes']} {_FALLBACK_FEASIBILITY_NOTE} "
+            f"(Original proposal rejected: {rejection_reason}.)"
+        ).strip()
+    else:
+        fields["dataset_pointer"] = str(fields["dataset_pointer"]).strip()
 
     required = {
-        "question": question,
-        "method": method,
-        "protocol_steps": protocol_steps,
-        "confirm_if": confirm_if,
-        "refute_if": refute_if,
-        "claude_science_prompt": claude_science_prompt,
+        "question": fields["question"],
+        "method": fields["method"],
+        "protocol_steps": fields["protocol_steps"],
+        "confirm_if": fields["confirm_if"],
+        "refute_if": fields["refute_if"],
+        "claude_science_prompt": fields["claude_science_prompt"],
     }
     missing = [name for name, value in required.items() if not value]
     if missing:
         raise TransBenchLLMError(
             502,
             "llm_bad_output",
-            f"Experiment designer response missing required field(s) {missing}: {parsed!r}",
+            f"Experiment designer response missing required field(s) {missing} "
+            f"(after {'a Tabula-Sapiens-forced retry' if rejection_reason else 'the first attempt'}): {fields!r}",
         )
 
     try:
         return ExperimentPlan(
             hypothesis_id=candidate.id,
-            question=question,
-            dataset=dataset,
-            dataset_pointer=dataset_pointer,
-            method=method,
-            protocol_steps=protocol_steps,
-            confirm_if=confirm_if,
-            refute_if=refute_if,
-            feasibility_notes=feasibility_notes or _FALLBACK_FEASIBILITY_NOTE,
-            claude_science_prompt=claude_science_prompt,
+            question=fields["question"],
+            dataset=fields["dataset"],
+            dataset_pointer=fields["dataset_pointer"],
+            method=fields["method"],
+            protocol_steps=fields["protocol_steps"],
+            confirm_if=fields["confirm_if"],
+            refute_if=fields["refute_if"],
+            feasibility_notes=fields["feasibility_notes"] or _FALLBACK_FEASIBILITY_NOTE,
+            claude_science_prompt=fields["claude_science_prompt"],
         )
     except ValidationError as exc:
         raise TransBenchLLMError(

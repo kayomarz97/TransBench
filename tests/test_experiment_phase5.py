@@ -1,25 +1,49 @@
 """Phase 5 acceptance test (KICKOFF.md Phase 5 / BUILD_SPEC.md §5, §8, §9).
 
-Mixes ONE live test (skipped without a working ``ANTHROPIC_API_KEY``) with
-several fully-OFFLINE, deterministic tests (zero network, zero API cost) —
-deliberately NO module-level ``pytestmark`` skip (that would incorrectly
-skip the offline tests too; mirrors ``test_pubmed_query_builder.py``'s own
-documented reasoning), so only the live test carries its own
-``@pytest.mark.skipif`` decorator.
+Mixes live tests (skipped without a working ``ANTHROPIC_API_KEY``, or without
+NCBI reachability for the NCBI-only ones) with several fully-OFFLINE,
+deterministic tests (zero network, zero API cost) — deliberately NO
+module-level ``pytestmark`` skip (that would incorrectly skip the offline
+tests too; mirrors ``test_pubmed_query_builder.py``'s own documented
+reasoning), so only the live tests carry their own decorators.
 
-Live (agents 7-8, full pipeline): exactly ONE flagship pass — a candidate is
-selected, its ``ExperimentPlan`` names a resolvable dataset with a runnable
-protocol + ``claude_science_prompt``, the full ``TransBrief`` validates, and
-``run_manifest["retrieval_snapshot"]`` is populated (BUILD_SPEC.md §9).
+Live (agents 7-8, full pipeline, needs ANTHROPIC_API_KEY): exactly ONE
+flagship pass — a candidate is selected, its ``ExperimentPlan`` names a
+dataset that is INDEPENDENTLY RE-VERIFIED (real NCBI network call, not a
+host-only check — Opus verification finding, see below) to actually resolve
+to a matching dataset, with a runnable protocol + ``claude_science_prompt``,
+the full ``TransBrief`` validates, and ``run_manifest["retrieval_snapshot"]``
+is populated (BUILD_SPEC.md §9).
+
+Dataset CONTENT verification (Opus verification finding, post-Phase-5-v1):
+a host-only / reachability-only dataset_pointer check is NOT enough — an
+accession can resolve (HTTP 200, recognized host) while describing a
+COMPLETELY DIFFERENT dataset than the plan claims. Confirmed live, TWICE,
+independently: this repo's own earlier flagship run named GSE200257 as
+adrenal-cortex bulk RNA-seq when it is REALLY single-cell blood/tonsillar
+T-cell data; Opus's verifier run named GSE200827 as KPMP kidney
+single-nucleus RNA-seq when it is REALLY an HL-60 leukemia-cell-line
+microarray SuperSeries. ``agents.run_design_experiment`` now fetches the
+REAL GEO record (``agents._fetch_geo_soft_record``) and checks organism +
+keyword-overlap consistency (``agents._verify_geo_record_matches_claim``)
+before ever accepting a model-named accession; on rejection it retries with
+Tabula Sapiens FORCED and rewrites dataset/dataset_pointer/
+feasibility_notes/claude_science_prompt/protocol_steps/method/confirm_if/
+refute_if so the rejected accession never leaks into the final plan.
 
 Offline/deterministic:
-  - ``_is_recognized_dataset_pointer``'s allow-list (agent 7's code-level
-    "never fabricate an accession" guard).
-  - ``run_design_experiment``'s dataset-fallback branch (unrecognized
-    pointer -> pinned default + feasibility note) and pass-through branch
-    (a recognized GEO/CELLxGENE/DOI pointer is used verbatim); the
-    ``hypothesis_id`` is never trusted from the model's own echo; missing
-    required fields raise ``TransBenchLLMError``.
+  - ``_is_recognized_dataset_pointer``'s allow-list (agent 7's fast
+    structural pre-filter, layered under the real content-verification
+    above).
+  - GEO SOFT-text parsing (``_parse_geo_soft_text``) and accession
+    extraction (``_extract_geo_accession``).
+  - ``_verify_geo_record_matches_claim`` against REAL, hand-captured GEO
+    records (a genuine kidney match, and the two confirmed-live mismatches
+    above) — proves the keyword-overlap heuristic actually discriminates.
+  - ``run_design_experiment``'s full verify-then-fallback wiring, with
+    ``agents._fetch_geo_soft_record`` monkeypatched (returns a mismatched or
+    empty record) and a 2-call scripted fake LLM (free-choice attempt +
+    Tabula-Sapiens-forced retry) — zero network, zero API cost.
   - ``run_assemble`` end to end against a hand-built ``state`` dict + a fake
     Haiku double: references dedup across hypotheses + grade-attach,
     ``contradictions_surfaced``, the ``top_experiment=None`` -> honest
@@ -45,6 +69,7 @@ classes directly — the same reuse-seam discipline production code follows
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 from types import SimpleNamespace
@@ -52,13 +77,17 @@ from typing import Any, Optional
 from urllib.parse import urlsplit
 
 import anthropic
+import httpx
 import pytest
 
 from tests.fixtures import FLAGSHIP_OBSERVATION
 from transbench import agents, config
 from transbench.agents import (
     TransBenchLLMError,
+    _extract_geo_accession,
     _is_recognized_dataset_pointer,
+    _parse_geo_soft_text,
+    _verify_geo_record_matches_claim,
     run_assemble,
     run_design_experiment,
     run_retrieve,
@@ -85,17 +114,22 @@ class _FakeAIMessage:
 
 class _FakeJSONLLM:
     """Fake ``llm`` double matching the ONE method ``agents._ainvoke_json``
-    calls (``await llm.ainvoke(messages)``). Returns a pre-scripted response
-    on every call and records every call's messages."""
+    calls (``await llm.ainvoke(messages)``). Returns either ONE fixed
+    response (used for every call) or a SEQUENCE of responses consumed in
+    call order (for testing multi-call flows, e.g. ``run_design_experiment``
+    's verify-then-retry path) — the last provided response repeats for any
+    further calls beyond the scripted sequence. Records every call's
+    messages."""
 
-    def __init__(self, response_content: str, usage_metadata: Optional[dict] = None) -> None:
-        self._response_content = response_content
+    def __init__(self, response_contents: str | list[str], usage_metadata: Optional[dict] = None) -> None:
+        self._responses = response_contents if isinstance(response_contents, list) else [response_contents]
         self._usage_metadata = usage_metadata
         self.calls: list[list[Any]] = []
 
     async def ainvoke(self, messages: list[Any]) -> _FakeAIMessage:
         self.calls.append(messages)
-        return _FakeAIMessage(self._response_content, self._usage_metadata)
+        idx = min(len(self.calls) - 1, len(self._responses) - 1)
+        return _FakeAIMessage(self._responses[idx], self._usage_metadata)
 
 
 class _FakeRaisingLLM:
@@ -107,7 +141,29 @@ class _FakeRaisingLLM:
 
 
 def _json_llm(payload: Any, usage_metadata: Optional[dict] = None) -> _FakeJSONLLM:
+    """A fake LLM returning ONE fixed JSON response for every call."""
     return _FakeJSONLLM(json.dumps(payload), usage_metadata)
+
+
+def _sequential_json_llm(payloads: list[Any], usage_metadata: Optional[dict] = None) -> _FakeJSONLLM:
+    """A fake LLM returning a DIFFERENT scripted JSON response for each
+    successive call, in order (repeats the last one if over-called)."""
+    return _FakeJSONLLM([json.dumps(p) for p in payloads], usage_metadata)
+
+
+def _skip_on_ncbi_connection_error(fn):
+    """Decorator: skip (not fail) a real-NCBI-network test if NCBI itself is
+    unreachable from this environment — keeps a pure-connectivity problem
+    from being conflated with a genuine code regression."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            pytest.skip(f"NCBI unreachable from this environment: {exc}")
+
+    return wrapper
 
 
 def _hypothesis(hyp_id: str = "h1") -> Hypothesis:
@@ -192,39 +248,74 @@ def test_is_recognized_dataset_pointer_rejects_everything_else(url: Optional[str
 
 
 # ---------------------------------------------------------------------------
-# Offline: agent 7 (run_design_experiment)
+# Offline: agent 7 (run_design_experiment) -- structural pre-filter /
+# question-synonym / required-field tests. These are NOT about dataset
+# CONTENT verification (that has its own dedicated section below), so each
+# monkeypatches ``agents._verify_dataset_pointer`` to a fixed, fast,
+# offline-safe verdict to keep them focused and network-free.
 # ---------------------------------------------------------------------------
 
 
-def test_run_design_experiment_falls_back_when_dataset_pointer_unrecognized() -> None:
-    fake_llm = _json_llm(
-        {
-            "hypothesis_id": "wrong-id-the-model-made-up",
-            "question": "Does marker X mark a distinct effector-memory T-cell state?",
-            "dataset": "Some Unverified Dataset",
-            "dataset_pointer": "https://example.com/not-a-real-dataset-host",
-            "method": "scRNA-seq differential-state analysis",
-            "protocol_steps": ["Load the dataset", "Cluster T cells", "Compare marker expression"],
-            "confirm_if": "Marker X is significantly enriched in the effector-memory cluster.",
-            "refute_if": "No differential enrichment of marker X is found across clusters.",
-            "feasibility_notes": "Should be feasible with public data.",
-            "claude_science_prompt": "Run a differential-expression analysis on the T-cell compartment.",
-        }
+def test_run_design_experiment_falls_back_when_dataset_pointer_unrecognized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Never reaches _verify_dataset_pointer at all -- the structural
+    # pre-filter (unrecognized host) rejects before any network call would
+    # happen -- so no monkeypatch is needed for THIS one specifically, but
+    # the retry (2nd Sonnet call, forced Tabula Sapiens) still fires.
+    fake_llm = _sequential_json_llm(
+        [
+            {
+                "hypothesis_id": "wrong-id-the-model-made-up",
+                "question": "Does marker X mark a distinct effector-memory T-cell state?",
+                "dataset": "Some Unverified Dataset",
+                "dataset_pointer": "https://example.com/not-a-real-dataset-host",
+                "method": "scRNA-seq differential-state analysis",
+                "protocol_steps": ["Load the dataset", "Cluster T cells", "Compare marker expression"],
+                "confirm_if": "Marker X is significantly enriched in the effector-memory cluster.",
+                "refute_if": "No differential enrichment of marker X is found across clusters.",
+                "feasibility_notes": "Should be feasible with public data.",
+                "claude_science_prompt": "Run a differential-expression analysis on the T-cell compartment.",
+            },
+            {
+                "hypothesis_id": "wrong-id-the-model-made-up",
+                "question": "Does marker X mark a distinct T-cell state within Tabula Sapiens' immune compartment?",
+                "dataset": config.DEFAULT_DATASET,
+                "dataset_pointer": config.DEFAULT_DATASET_POINTER,
+                "method": "scRNA-seq differential-state analysis of the Tabula Sapiens immune compartment.",
+                "protocol_steps": ["Load Tabula Sapiens immune compartment", "Cluster T cells", "Compare marker expression"],
+                "confirm_if": "Marker X is significantly enriched in the effector-memory cluster.",
+                "refute_if": "No differential enrichment of marker X is found across clusters.",
+                "feasibility_notes": "Guaranteed-resolvable pinned atlas.",
+                "claude_science_prompt": "Using the Tabula Sapiens immune compartment, run a differential-expression analysis.",
+            },
+        ]
     )
 
     plan = asyncio.run(run_design_experiment(_hypothesis("h-real-id"), [_supporting_evidence()], fake_llm))
 
-    assert len(fake_llm.calls) == 1  # ONE Sonnet call
+    assert len(fake_llm.calls) == 2  # free-choice attempt + Tabula-Sapiens-forced retry
     assert plan.hypothesis_id == "h-real-id"  # never trusts the model's echoed id
     assert plan.dataset == config.DEFAULT_DATASET
     assert plan.dataset_pointer == config.DEFAULT_DATASET_POINTER
     assert _is_recognized_dataset_pointer(plan.dataset_pointer)
     assert "pinned default" in plan.feasibility_notes.lower()
-    assert "should be feasible with public data" in plan.feasibility_notes.lower()  # original text preserved, not replaced
-    assert plan.protocol_steps == ["Load the dataset", "Cluster T cells", "Compare marker expression"]
+    assert "not a well-formed https url" in plan.feasibility_notes.lower()  # the real rejection reason, recorded
+    assert "example.com" not in plan.claude_science_prompt  # the rejected dataset never leaks into the final prompt
+    assert plan.protocol_steps == [
+        "Load Tabula Sapiens immune compartment", "Cluster T cells", "Compare marker expression",
+    ]
 
 
-def test_run_design_experiment_keeps_recognized_dataset_pointer_verbatim() -> None:
+def test_run_design_experiment_keeps_recognized_dataset_pointer_verbatim(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Content verification is tested separately (below); here it is forced
+    # to succeed so this test stays focused on "a verified pointer is used
+    # verbatim, unmodified" and stays offline/network-free.
+    async def _always_verified(dataset: str, dataset_pointer: Any, claimed_text: str) -> tuple[bool, str]:
+        return True, ""
+
+    monkeypatch.setattr(agents, "_verify_dataset_pointer", _always_verified)
+
     fake_llm = _json_llm(
         {
             "hypothesis_id": "irrelevant",
@@ -242,13 +333,14 @@ def test_run_design_experiment_keeps_recognized_dataset_pointer_verbatim() -> No
 
     plan = asyncio.run(run_design_experiment(_hypothesis("h1"), [_supporting_evidence()], fake_llm))
 
+    assert len(fake_llm.calls) == 1  # verified on the first attempt -- no retry needed
     assert plan.dataset_pointer == "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE12345"
     assert plan.dataset.startswith("GSE12345")
     assert "pinned default" not in plan.feasibility_notes.lower()
     assert plan.hypothesis_id == "h1"
 
 
-def test_run_design_experiment_accepts_title_as_a_question_synonym() -> None:
+def test_run_design_experiment_accepts_title_as_a_question_synonym(monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression guard for a REAL defect found on this phase's own live
     flagship run: Sonnet returned an otherwise excellent, fully-grounded
     response (a real GEO accession, a complete protocol) but used the key
@@ -256,7 +348,18 @@ def test_run_design_experiment_accepts_title_as_a_question_synonym() -> None:
     verbatim ``EXPERIMENT_DESIGNER_SYSTEM_PROMPT`` text never spells out
     "question" as a literal JSON key the way it does for every other field.
     This is a trimmed-down reproduction of that exact real response shape.
+    Dataset content verification is forced to succeed (monkeypatched) —
+    this test is specifically about the question/title synonym handling,
+    not dataset verification (covered separately below; a GSE200257 pointer
+    with an adrenal-cortex claim is in fact one of the two REAL confirmed
+    -live content mismatches this whole fix addresses, so it must NOT be
+    used here as if it were a legitimate accept-verbatim case).
     """
+    async def _always_verified(dataset: str, dataset_pointer: Any, claimed_text: str) -> tuple[bool, str]:
+        return True, ""
+
+    monkeypatch.setattr(agents, "_verify_dataset_pointer", _always_verified)
+
     fake_llm = _json_llm(
         {
             "hypothesis_id": "H1",
@@ -283,7 +386,12 @@ def test_run_design_experiment_accepts_title_as_a_question_synonym() -> None:
     assert plan.hypothesis_id == "H1"
 
 
-def test_run_design_experiment_raises_on_missing_required_fields() -> None:
+def test_run_design_experiment_raises_on_missing_required_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _always_verified(dataset: str, dataset_pointer: Any, claimed_text: str) -> tuple[bool, str]:
+        return True, ""
+
+    monkeypatch.setattr(agents, "_verify_dataset_pointer", _always_verified)
+
     fake_llm = _json_llm(
         {
             "hypothesis_id": "h1",
@@ -304,11 +412,360 @@ def test_run_design_experiment_raises_on_missing_required_fields() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Offline: GEO SOFT-text parsing + accession extraction (pure functions).
+# ---------------------------------------------------------------------------
+
+
+def test_parse_geo_soft_text_extracts_repeated_fields() -> None:
+    text = (
+        "^SERIES = GSE1\n"
+        "!Series_title = Example title\n"
+        "!Series_summary = Example summary.\n"
+        "!Series_overall_design = Part one.\n"
+        "!Series_overall_design = Part two.\n"
+        "!Series_type = Expression profiling by array\n"
+        "!Series_platform_organism = Homo sapiens\n"
+    )
+    fields = _parse_geo_soft_text(text)
+    assert fields is not None
+    assert fields["Series_title"] == ["Example title"]
+    assert fields["Series_overall_design"] == ["Part one.", "Part two."]
+    assert fields["Series_platform_organism"] == ["Homo sapiens"]
+
+
+def test_parse_geo_soft_text_returns_none_for_html_error_page() -> None:
+    # A trimmed real capture of NCBI's actual HTML response for a
+    # nonexistent accession (status 200, but no SOFT fields at all).
+    html = (
+        '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">\n'
+        "<HTML>\n  <HEAD>\n    <TITLE>\n    GEO Accession viewer\n    </TITLE>\n  </HEAD>\n</HTML>\n"
+    )
+    assert _parse_geo_soft_text(html) is None
+
+
+def test_parse_geo_soft_text_returns_none_for_empty_text() -> None:
+    assert _parse_geo_soft_text("") is None
+
+
+def test_extract_geo_accession_prefers_pointer_then_dataset() -> None:
+    assert (
+        _extract_geo_accession("GSE1 something", "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE2")
+        == "GSE2"
+    )
+    assert _extract_geo_accession("GSE3 something", "https://tabula-sapiens-portal.ds.czbiohub.org/") == "GSE3"
+    assert _extract_geo_accession("no accession here", "https://tabula-sapiens-portal.ds.czbiohub.org/") is None
+
+
+# ---------------------------------------------------------------------------
+# Offline: dataset CONTENT-verification keyword matching, against REAL
+# hand-captured GEO records (Opus verification finding). No network -- these
+# are literal, trimmed captures of real ``_fetch_geo_soft_record`` output
+# fetched live during this fix's own development (kept verbatim so the test
+# proves the matcher against REALITY, not an idealized hypothetical).
+# ---------------------------------------------------------------------------
+
+# GSE121862 — a REAL, genuine match for a KPMP human kidney snRNA-seq claim.
+_REAL_KIDNEY_RECORD: dict[str, list[str]] = {
+    "Series_title": [
+        "A single-nucleus RNA-sequencing pipeline to decipher the molecular "
+        "anatomy and pathophysiology of human kidneys"
+    ],
+    "Series_summary": [
+        "Defining cellular and molecular identities within the kidney is necessary to "
+        "understand its organization and function in health and disease. Here we "
+        "demonstrate a reproducible method with minimal artifacts for single-nucleus "
+        "Droplet-based RNA sequencing (snDrop-Seq) that we use to resolve thirty "
+        "distinct cell populations in human adult kidney. We define molecular "
+        "transition states along more than ten nephron segments spanning two major "
+        "kidney regions. We further delineate cell type-specific expression of genes "
+        "associated with chronic kidney disease, diabetes and hypertension."
+    ],
+    "Series_overall_design": [
+        "Single-nucleus (sn)Drop-seq was used to generate RNA expression estimates "
+        "across two kidney regions (cortex and medulla), 15 different individuals, 7 "
+        "different tissue processing methods, and from tissues acquired from two "
+        "different institutions (Washington University and University of Michigan "
+        "through KPMP consortium).",
+        "From the resulting ~18,000 sequenced nuclei passing QC filtering, we "
+        "identified 30 different cell populations.",
+    ],
+    "Series_type": ["Expression profiling by high throughput sequencing"],
+    "Series_platform_organism": ["Homo sapiens"],
+    "Series_sample_organism": ["Homo sapiens"],
+}
+
+# GSE200827 — a REAL record: Opus verification's exact confirmed-live
+# mismatch (an HL-60 leukemia-cell-line microarray SuperSeries, NOT the KPMP
+# human-kidney snRNA-seq dataset a plan wrongly claimed it to be).
+_REAL_HL60_RECORD: dict[str, list[str]] = {
+    "Series_title": [
+        "Gene expression profiles during the process of differentiation of "
+        "HL-60 cells into neutrophils or eosinophils"
+    ],
+    "Series_summary": ["This SuperSeries is composed of the SubSeries listed below."],
+    "Series_overall_design": ["Refer to individual Series"],
+    "Series_type": ["Expression profiling by array"],
+    "Series_platform_organism": ["Homo sapien"],  # the real observed truncation (no trailing "s")
+}
+
+# GSE200257 — a REAL record: THIS repo's own earlier flagship run's
+# confirmed-live mismatch (single-cell blood/tonsillar T-cell data, NOT the
+# "adrenal cortex bulk RNA-seq" a plan wrongly claimed it to be).
+_REAL_TCELL_RECORD: dict[str, list[str]] = {
+    "Series_title": ["Single-cell RNA-sequencing of blood and tonsillar CD4+ CD57+ and CD57- T cells"],
+    "Series_summary": [
+        "Gene-environment interactions are implicated in immunopathology. We defined "
+        "two terminal-differentiation pathways for human CD4+ T cells each marked by "
+        "CD57. Rare blood CD57+ CD4+ T cells marked by TCF1 downregulation adopt a "
+        "cytotoxic and terminal-effector transcriptome."
+    ],
+    "Series_overall_design": [
+        "CD57+ CD4+ T cells and CD57- CD4+ T cells from tonsil and blood samples of a "
+        "child were FACS-purified and processed with 10x Genomics single cell "
+        "gene expression and VDJ libraries."
+    ],
+    "Series_type": ["Expression profiling by high throughput sequencing", "Other"],
+    "Series_sample_organism": ["Homo sapiens"],
+}
+
+
+def test_verify_geo_record_accepts_genuine_kidney_match() -> None:
+    claimed = (
+        "GSE121862 KPMP human kidney single-nucleus RNA-seq study of chronic "
+        "kidney disease across nephron segments, cortex and medulla"
+    )
+    ok, reason = _verify_geo_record_matches_claim(_REAL_KIDNEY_RECORD, claimed)
+    assert ok is True, reason
+
+
+def test_verify_geo_record_rejects_kidney_claim_against_real_hl60_record() -> None:
+    """THE exact defect Opus verification found live: a plan claims GSE200827
+    is a KPMP human kidney dataset; the real record is HL-60 leukemia-cell
+    differentiation. Must be rejected."""
+    claimed = "GSE200827 KPMP human kidney single-nucleus RNA-seq, ~50 donors, CKD 1-5"
+    ok, reason = _verify_geo_record_matches_claim(_REAL_HL60_RECORD, claimed)
+    assert ok is False
+    assert "hl-60" in reason.lower() or "neutrophils" in reason.lower()
+
+
+def test_verify_geo_record_rejects_adrenal_claim_against_real_tcell_record() -> None:
+    """This repo's OWN earlier (pre-fix) flagship run's confirmed-live
+    mismatch: a plan claimed GSE200257 was adrenal-cortex bulk RNA-seq; the
+    real record is single-cell blood/tonsillar T-cell data. Must be
+    rejected."""
+    claimed = (
+        "Bulk RNA-seq of human adrenal cortex tissue samples including "
+        "aldosterone-producing adenomas APA and bilateral adrenal hyperplasia BAH"
+    )
+    ok, reason = _verify_geo_record_matches_claim(_REAL_TCELL_RECORD, claimed)
+    assert ok is False
+    assert "t cells" in reason.lower() or "tonsillar" in reason.lower()
+
+
+def test_verify_geo_record_accepts_homo_sapien_truncation() -> None:
+    """The organism check must not falsely reject the real "Homo sapien" (no
+    trailing s) truncation observed live in the HL-60 record's own
+    ``Series_platform_organism`` field -- rejection for an unrelated claim
+    must come from the KEYWORD check, never the organism check."""
+    ok, reason = _verify_geo_record_matches_claim(
+        _REAL_HL60_RECORD, "totally unrelated claim text sharing no real keywords at all"
+    )
+    assert ok is False
+    assert "organism" not in reason.lower()
+
+
+def test_verify_geo_record_rejects_non_human_organism() -> None:
+    record = {
+        "Series_title": ["A comprehensive single-cell atlas of mouse kidney"],
+        "Series_summary": ["A comprehensive single-cell RNA-seq atlas of the mouse kidney."],
+        "Series_platform_organism": ["Mus musculus"],
+        "Series_sample_organism": ["Mus musculus"],
+    }
+    ok, reason = _verify_geo_record_matches_claim(record, "comprehensive mouse kidney single-cell atlas")
+    assert ok is False
+    assert "organism" in reason.lower()
+
+
+# ---------------------------------------------------------------------------
+# Offline: run_design_experiment's full verify-then-fallback WIRING, with
+# agents._fetch_geo_soft_record monkeypatched (the exact seam BUILD_SPEC's
+# coordinator asked for) -- proves the fallback REWRITES dataset_pointer AND
+# claude_science_prompt (not just dataset/feasibility_notes) so the rejected
+# accession never leaks into the final plan. Zero network, zero API cost.
+# ---------------------------------------------------------------------------
+
+
+def test_run_design_experiment_falls_back_and_rewrites_prompt_on_content_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_response = {
+        "hypothesis_id": "h1",
+        "question": "Does marker X mark a distinct kidney cell population?",
+        "dataset": "GSE200827 (KPMP human kidney single-nucleus RNA-seq, ~50 donors, CKD 1-5)",
+        "dataset_pointer": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE200827",
+        "method": "Single-nucleus RNA-seq differential expression in human kidney across CKD stages.",
+        "protocol_steps": ["Download GSE200827", "Cluster kidney nuclei", "Compare across CKD stage"],
+        "confirm_if": "Marker X is enriched in the relevant kidney cell population.",
+        "refute_if": "No enrichment is found.",
+        "feasibility_notes": "KPMP kidney atlas, verified to resolve.",
+        "claude_science_prompt": "Using GSE200827 (KPMP human kidney snRNA-seq), analyze kidney nuclei for marker X.",
+    }
+    retry_response = {
+        "hypothesis_id": "h1",
+        "question": "Does marker X mark a distinct kidney-relevant cell population in Tabula Sapiens?",
+        "dataset": "ignored -- should be overridden",
+        "dataset_pointer": "https://also-ignored.example.com/",
+        "method": "Analysis of the kidney compartment of the Tabula Sapiens atlas.",
+        "protocol_steps": ["Load the Tabula Sapiens kidney compartment", "Cluster cells", "Test marker X expression"],
+        "confirm_if": "Marker X is enriched in a distinct kidney cell population within Tabula Sapiens.",
+        "refute_if": "No such enrichment is found.",
+        "feasibility_notes": "Using the pinned Tabula Sapiens atlas kidney compartment.",
+        "claude_science_prompt": "Using the Tabula Sapiens atlas (kidney compartment), analyze marker X expression across kidney cell types.",
+    }
+    fake_llm = _sequential_json_llm([first_response, retry_response])
+
+    async def _fake_fetch_geo(accession: str) -> dict[str, list[str]]:
+        assert accession == "GSE200827"
+        return dict(_REAL_HL60_RECORD)  # the real, topically UNRELATED record
+
+    monkeypatch.setattr(agents, "_fetch_geo_soft_record", _fake_fetch_geo)
+
+    plan = asyncio.run(run_design_experiment(_hypothesis("h1"), [_supporting_evidence()], fake_llm))
+
+    assert len(fake_llm.calls) == 2  # the free-choice attempt + the forced Tabula-Sapiens retry
+    assert plan.dataset == config.DEFAULT_DATASET
+    assert plan.dataset_pointer == config.DEFAULT_DATASET_POINTER
+    # The rejected accession must never leak into ANY final field.
+    assert "GSE200827" not in plan.claude_science_prompt
+    assert "GSE200827" not in plan.dataset_pointer
+    assert all("GSE200827" not in step for step in plan.protocol_steps)
+    assert "GSE200827" not in plan.method
+    assert "tabula sapiens" in plan.claude_science_prompt.lower()
+    assert "kidney" in plan.claude_science_prompt.lower()  # the hypothesis-relevant compartment, from the retry
+    assert "pinned default" in plan.feasibility_notes.lower()
+    assert "hl-60" in plan.feasibility_notes.lower() or "does not match" in plan.feasibility_notes.lower()
+
+
+def test_run_design_experiment_falls_back_when_geo_accession_does_not_resolve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_response = {
+        "hypothesis_id": "h1",
+        "question": "Does marker X mark a distinct kidney cell population?",
+        "dataset": "GSE99999999 (fabricated accession)",
+        "dataset_pointer": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE99999999",
+        "method": "snRNA-seq differential expression.",
+        "protocol_steps": ["Download the dataset", "Cluster", "Compare"],
+        "confirm_if": "Marker X is enriched.",
+        "refute_if": "No enrichment is found.",
+        "feasibility_notes": "Should resolve.",
+        "claude_science_prompt": "Using GSE99999999, analyze marker X.",
+    }
+    retry_response = {
+        "hypothesis_id": "h1",
+        "question": "Does marker X mark a distinct kidney-relevant cell population in Tabula Sapiens?",
+        "dataset": "ignored",
+        "dataset_pointer": "https://ignored.example.com/",
+        "method": "Analysis of the kidney compartment of the Tabula Sapiens atlas.",
+        "protocol_steps": ["Load the Tabula Sapiens kidney compartment", "Cluster", "Compare"],
+        "confirm_if": "Marker X is enriched within Tabula Sapiens.",
+        "refute_if": "No enrichment is found.",
+        "feasibility_notes": "Using the pinned Tabula Sapiens atlas.",
+        "claude_science_prompt": "Using the Tabula Sapiens atlas (kidney compartment), analyze marker X.",
+    }
+    fake_llm = _sequential_json_llm([first_response, retry_response])
+
+    async def _fake_fetch_geo_none(accession: str) -> None:
+        return None  # simulates a genuinely nonexistent / unresolvable accession
+
+    monkeypatch.setattr(agents, "_fetch_geo_soft_record", _fake_fetch_geo_none)
+
+    plan = asyncio.run(run_design_experiment(_hypothesis("h1"), [_supporting_evidence()], fake_llm))
+
+    assert plan.dataset_pointer == config.DEFAULT_DATASET_POINTER
+    assert "GSE99999999" not in plan.claude_science_prompt
+    assert "does not resolve" in plan.feasibility_notes.lower() or "pinned default" in plan.feasibility_notes.lower()
+
+
+# ---------------------------------------------------------------------------
+# Live (real NCBI network, NO Anthropic key needed): the fetch+parse+match
+# pipeline against REAL, live NCBI responses (not just the hand-captured
+# fixtures above) -- proves the wiring genuinely works against reality, not
+# only against a controlled offline snapshot.
+# ---------------------------------------------------------------------------
+
+
+@_skip_on_ncbi_connection_error
+def test_verify_dataset_pointer_against_real_ncbi_rejects_known_mismatch() -> None:
+    """Real network call to REAL NCBI -- the exact accession Opus
+    verification found live: GSE200827 genuinely resolves (a real HL-60
+    leukemia microarray SuperSeries), but does NOT match a claimed KPMP
+    human-kidney snRNA-seq plan."""
+    claimed = (
+        "KPMP human kidney single-nucleus RNA-seq study of chronic kidney "
+        "disease across CKD stages 1-5, nephron segments"
+    )
+    verified, reason = asyncio.run(
+        agents._verify_dataset_pointer(
+            "GSE200827", "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE200827", claimed
+        )
+    )
+    assert verified is False, reason
+
+
+@_skip_on_ncbi_connection_error
+def test_verify_dataset_pointer_against_real_ncbi_rejects_nonexistent_accession() -> None:
+    verified, reason = asyncio.run(
+        agents._verify_dataset_pointer(
+            "GSE99999999", "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE99999999", "anything at all"
+        )
+    )
+    assert verified is False
+    assert "does not resolve" in reason.lower()
+
+
+@_skip_on_ncbi_connection_error
+def test_verify_dataset_pointer_against_real_ncbi_accepts_genuine_match() -> None:
+    claimed = (
+        "GSE121862 KPMP human kidney single-nucleus RNA-seq chronic kidney "
+        "disease nephron segments cortex medulla"
+    )
+    verified, reason = asyncio.run(
+        agents._verify_dataset_pointer(
+            "GSE121862", "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE121862", claimed
+        )
+    )
+    assert verified is True, reason
+
+
+@_skip_on_ncbi_connection_error
+def test_tabula_sapiens_default_pointer_resolves() -> None:
+    """BUILD_SPEC.md §8 / Opus verification requirement: confirm the pinned
+    fallback default itself genuinely resolves -- the guaranteed-safe
+    substrate every fallback trusts absolutely (without re-verification,
+    for speed -- see run_design_experiment's docstring) must actually BE
+    reachable."""
+    response = httpx.get(config.DEFAULT_DATASET_POINTER, timeout=15, follow_redirects=True)
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
 # Offline: agent 8 (run_assemble)
 # ---------------------------------------------------------------------------
 
 
-def test_run_assemble_builds_references_contradictions_and_manifest() -> None:
+def test_run_assemble_builds_references_contradictions_and_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    # This test is about run_assemble, not dataset verification -- force
+    # run_design_experiment's (embedded, below) dataset check to succeed
+    # without a network call, keeping this test genuinely offline (its
+    # dataset_pointer is the Tabula Sapiens URL, which is NOT GEO-shaped and
+    # would otherwise route to _verify_dataset_pointer's real reachability
+    # check).
+    async def _always_verified(dataset: str, dataset_pointer: Any, claimed_text: str) -> tuple[bool, str]:
+        return True, ""
+
+    monkeypatch.setattr(agents, "_verify_dataset_pointer", _always_verified)
+
     registry_a = _make_registry(
         [
             {"pmid": "11111111", "title": "T cells and hypertension", "abstract": "x", "year": 2015, "journal": "Hypertension"},
@@ -669,9 +1126,15 @@ def _run_flagship_with_retry() -> TransBrief:
 def test_flagship_experiment_plan_and_full_brief() -> None:
     """Real end-to-end call: the full 8-agent pipeline for the flagship
     observation. Asserts a candidate is selected, its ExperimentPlan names a
-    well-formed, recognized-host, resolvable dataset with a runnable
-    protocol + claude_science_prompt, the full TransBrief validates, and the
-    BUILD_SPEC.md §9 retrieval snapshot is populated."""
+    dataset whose FINAL dataset_pointer is INDEPENDENTLY RE-VERIFIED (a
+    fresh, real NCBI network call in THIS test, not merely trusting that
+    run_design_experiment's own internal gate ran -- Opus verification
+    finding: a host-only check is not enough, an accession can resolve
+    while describing a completely different dataset) to actually resolve to
+    a dataset consistent with the plan's own claims -- either the model's
+    own accession genuinely verified, or the guaranteed-resolvable Tabula
+    Sapiens fallback. The full TransBrief validates, and the BUILD_SPEC.md
+    §9 retrieval snapshot is populated."""
     brief = _run_flagship_with_retry()
 
     revalidated = TransBrief.model_validate(brief.model_dump())
@@ -696,6 +1159,22 @@ def test_flagship_experiment_plan_and_full_brief() -> None:
         f"dataset_pointer must resolve to a recognized public dataset host "
         f"(CELLxGENE/Tabula Sapiens/NCBI GEO/ArrayExpress/DOI): {plan.dataset_pointer!r}"
     )
+
+    # THE core Opus-verification-mandated check: an INDEPENDENT, real-network
+    # re-verification that the FINAL dataset_pointer actually resolves to a
+    # dataset consistent with the plan's own claims -- not merely that it
+    # is a well-formed URL to a recognized host (that alone is exactly what
+    # let a real-but-wrong accession through before this fix).
+    try:
+        claimed_text = " ".join(filter(None, [plan.dataset, plan.method, plan.feasibility_notes, plan.question]))
+        verified, reason = asyncio.run(agents._verify_dataset_pointer(plan.dataset, plan.dataset_pointer, claimed_text))
+    except (httpx.TransportError, httpx.TimeoutException) as exc:
+        pytest.skip(f"NCBI unreachable for independent re-verification: {exc}")
+    assert verified, (
+        f"FINAL dataset_pointer {plan.dataset_pointer!r} (dataset={plan.dataset!r}) failed "
+        f"independent re-verification: {reason}"
+    )
+
     assert plan.protocol_steps and all(isinstance(s, str) and s.strip() for s in plan.protocol_steps)
     assert plan.claude_science_prompt.strip()
     assert plan.confirm_if.strip()
@@ -720,10 +1199,14 @@ def test_flagship_experiment_plan_and_full_brief() -> None:
     token_spend = brief.run_manifest.get("token_spend")
     assert isinstance(token_spend, dict) and token_spend.get("calls", 0) > 0
 
+    fell_back_to_tabula_sapiens = plan.dataset_pointer == config.DEFAULT_DATASET_POINTER
     print("\n--- Phase 5 flagship experiment plan ---")
     print(f"selected hypothesis: {plan.hypothesis_id}")
     print(f"dataset: {plan.dataset}")
     print(f"dataset_pointer: {plan.dataset_pointer}")
+    print(
+        f"dataset provenance: {'FELL BACK to Tabula Sapiens (model-named dataset was rejected)' if fell_back_to_tabula_sapiens else 'model-named accession, independently verified'}"
+    )
     print(f"method: {plan.method}")
     print("protocol_steps:")
     for i, step in enumerate(plan.protocol_steps, 1):
