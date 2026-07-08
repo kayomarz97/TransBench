@@ -1,4 +1,4 @@
-"""config.py — env reads + constants (BUILD_SPEC.md §0.7/§0.8/§1, §9; KICKOFF Phase 1).
+"""config.py — env reads + constants (BUILD_SPEC.md §0.7/§0.8/§1, §9; KICKOFF Phase 1-2).
 
 No secrets are hardcoded here — API keys are read from the process environment
 only (populate a local, gitignored ``.env`` from ``.env.example``).
@@ -6,15 +6,42 @@ only (populate a local, gitignored ``.env`` from ``.env.example``).
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# ---------------------------------------------------------------------------
+# Load this repo's own gitignored .env — with override=True — BEFORE reading
+# any key below. Phase 2 rationale: the *ambient process* environment can
+# already hold a stale/invalid ANTHROPIC_API_KEY (e.g. exported once in a long
+# -lived shell/subagent), and every subagent/test process inherits it. A plain
+# ``load_dotenv()`` defaults to ``override=False``, so that stale value would
+# silently win over the real key in .env and every live Anthropic call would
+# keep failing. ``override=True`` makes .env authoritative instead — the
+# correct BYOK behavior for this standalone repo (BUILD_SPEC.md §0.4: the key
+# is "keyed by the MCP ANTHROPIC_API_KEY env"; .env is how that env is
+# populated uniformly for the engine, tests, and the Phase 6 MCP server).
+#
+# repo_root: config.py lives at <repo>/src/transbench/config.py, so
+# parents[0]=src/transbench, parents[1]=src, parents[2]=<repo root>.
+# load_dotenv() on a missing path is a silent, safe no-op (returns False) —
+# no existence check needed; this repo's own gitignored .env is optional at
+# import time (mirrors PLAN.md's Phase 0 finding: no env var is *required* at
+# import, defaults/absence are fine — this just makes a *present* .env win).
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_REPO_ROOT / ".env", override=True)
 
 # ---------------------------------------------------------------------------
 # Force deterministic LLM clients through the reused Iatronix ``create_llm()``
 # factory. ``create_llm`` has no ``temperature`` kwarg of its own — it builds
 # clients at ``settings.llm_temperature`` (Iatronix default 0.2), and that
 # ``Settings`` object reads the env var ``LLM_TEMPERATURE`` (pydantic-settings,
-# case-insensitive). ``setdefault`` never clobbers an operator's own explicit
-# override. This is belt #1 of two (belt #2 is ``.bind(temperature=0)`` on every
-# client at each agents.py call site, added in Phase 2 — BUILD_SPEC.md §0.7).
+# case-insensitive). Placed AFTER ``load_dotenv`` above: if .env sets
+# LLM_TEMPERATURE, override=True already applied it; ``setdefault`` here is
+# purely the belt-and-suspenders fallback for when .env doesn't set it at all
+# (it never clobbers an explicit value either way). This is belt #1 of two
+# (belt #2 is ``.bind(temperature=0)`` on every client at each agents.py call
+# site, added in Phase 2 — BUILD_SPEC.md §0.7).
 #
 # This line MUST run before Iatronix's ``app.config.settings`` singleton is
 # first constructed (i.e. before ``app.config`` is imported anywhere). It is

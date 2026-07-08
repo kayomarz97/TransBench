@@ -7,6 +7,11 @@ name = "transbench"
 version = "0.1.0"
 description = "TransBench -- translational clinician<->bench agent, shipped as an MCP connector for Claude Science. Reuses the Iatronix backend read-only."
 requires-python = ">=3.11"
+# BUILD_SPEC §1's curated set (Phase 0) + python-dotenv (Phase 2, deliberate addition):
+# config.py loads this repo's own gitignored .env with override=True so a stale/invalid
+# ANTHROPIC_API_KEY already sitting in the ambient process env never wins over the real
+# BYOK key in .env -- required for the engine's own Anthropic calls to work uniformly
+# across tests, the engine, and (Phase 6) the MCP server.
 dependencies = [
     "iatronix-backend",
     "mcp",
@@ -22,6 +27,7 @@ dependencies = [
     "fastapi",
     "json-repair",
     "tenacity",
+    "python-dotenv",
 ]
 
 [tool.uv.sources]

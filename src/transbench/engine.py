@@ -7,16 +7,22 @@ wraps it with ``asyncio.run`` for non-async callers. Parameter names mirror
 below) so a caller can do ``run_transbench(**request.model_dump(exclude={"user_key"}),
 user_key=request.user_key)`` without any renaming.
 
-Note on ``user_key``: ``TransRequest.user_key`` is a *required* field (no
-default) because a real request always needs BYOK credentials for the LLM
-calls it triggers. This entrypoint's own signature instead defaults
-``user_key=None`` per KICKOFF.md Phase 1 ("``run_transbench(observation,
-focus_drug=None, user_key=None, ...) -> TransBrief``") because the Phase 1
-stub makes no LLM calls at all and must stay runnable without any key present
-(e.g. this repo's own acceptance tests). Phase 2+ agents that actually need a
-key raise a clean, caught ``fastapi.HTTPException`` from ``create_llm`` if one
-is missing (BUILD_SPEC.md §0.4) — this entrypoint does not duplicate that
-check.
+Note on ``user_key`` (BYOK, BUILD_SPEC.md §0.4): ``TransRequest.user_key`` is a
+*required* field there because a real request always needs BYOK credentials.
+This entrypoint's own signature instead defaults ``user_key=None`` per
+KICKOFF.md ("``run_transbench(observation, focus_drug=None, user_key=None,
+...) -> TransBrief``"), and — starting Phase 2, where decompose/hypothesize
+make real LLM calls — an explicit ``None`` falls back to
+``config.ANTHROPIC_API_KEY`` (read from the ``ANTHROPIC_API_KEY`` process env,
+BUILD_SPEC.md §0.4: "keyed by the MCP ANTHROPIC_API_KEY env"). This is BYOK's
+designated key source for this standalone repo, not a forbidden second/
+hardcoded "fallback key" (§0.4's "no fallback key" rule) — Phase 6's MCP
+server does the exact same env read before calling this function; doing it
+here too means callers that already have `ANTHROPIC_API_KEY` in their process
+env (e.g. this repo's own tests) don't need to thread it through by hand. An
+explicitly-passed ``user_key`` always takes precedence over the env. If
+neither is set, ``create_llm`` raises its own clean, caught error (surfaced
+as ``transbench.agents.TransBenchLLMError``) — never a raw exception.
 """
 from __future__ import annotations
 
@@ -41,15 +47,17 @@ async def run_transbench(
 ) -> TransBrief:
     """Run the full TransBench pipeline and return a validated ``TransBrief``.
 
-    Phase 1 (today): delegates to the stub LangGraph pipeline in ``graph.py``,
-    which echoes ``observation`` into a schema-valid placeholder brief — no
-    LLM or retrieval calls happen yet. Phase 2+ wires the real 8 agents
-    (BUILD_SPEC.md §5) behind this exact same signature.
+    Phase 2 (today): decompose (agent 1, Haiku) + hypothesize (agent 2,
+    Sonnet) make REAL Anthropic calls and populate ``TransBrief.axes`` +
+    ``hypotheses``. Agents 3-8 (retrieve/grade/novelty/rigor/design/assemble)
+    are still an accurate, clearly-labeled placeholder — Phases 3-5 wire
+    those in behind this exact same signature.
     """
+    effective_user_key = user_key if user_key is not None else config.ANTHROPIC_API_KEY
     return await run_transbench_graph(
         observation,
         focus_drug,
-        user_key,
+        effective_user_key,
         user_provider=user_provider,
         model_reasoning=model_reasoning,
         model_cheap=model_cheap,

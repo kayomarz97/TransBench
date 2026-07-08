@@ -1,14 +1,17 @@
-"""graph.py — LangGraph orchestration (BUILD_SPEC.md §5, KICKOFF.md Phase 1).
+"""graph.py — LangGraph orchestration (BUILD_SPEC.md §5, KICKOFF.md Phase 2).
 
-Phase 1 (this file, today): a single-node ``StateGraph`` that echoes the
-request into a schema-valid stub ``TransBrief`` — no LLM, retrieval, or
-network calls anywhere in this module.
+Phase 1 shipped a single-node stub. Phase 2 (this file, today) wires the
+first two REAL agents — Decomposer (Haiku) and Hypothesis Generator (Sonnet,
+BUILD_SPEC.md §5) — so the flagship observation now flows through real LLM
+calls and populates ``TransBrief.axes`` + ``hypotheses`` for real.
+Downstream stages (retrieve/grade/novelty/rigor/design/assemble — agents
+3-8) remain an accurate, clearly-labeled placeholder until Phases 3-5.
 
-Phases 2-5 grow this into the real topology (BUILD_SPEC.md §5, last
+Phases 3-5 grow this into the full topology (BUILD_SPEC.md §5, last
 paragraph): ``START -> decompose -> hypothesize -> fan-out(retrieve -> grade
 -> novelty) -> rigor -> design -> assemble -> END``. The ``TransBenchState``
-TypedDict below is deliberately shaped as a superset target so later phases
-add fields/nodes without reshaping what Phase 1 already established.
+TypedDict below is shaped as a superset target so later phases add
+fields/nodes without reshaping what's already established.
 """
 from __future__ import annotations
 
@@ -17,25 +20,30 @@ from typing import Optional, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from transbench import config
+from transbench import agents, config
 from transbench.reuse import REUSE_SOURCE
-from transbench.schemas import DecomposedAxis, ExperimentPlan, TransBrief
+from transbench.schemas import (
+    DecomposedAxis,
+    ExperimentPlan,
+    GradedHypothesis,
+    Hypothesis,
+    TransBrief,
+)
 
 # Default fallback experiment substrate (BUILD_SPEC.md §8: "Pinned dataset
 # (reproducibility)" — a real, versioned, publicly downloadable human
-# single-cell atlas with a T-cell compartment, guaranteed to resolve). Used
-# only as stub/placeholder content in Phase 1; the real experiment designer
-# (agent 7, Phase 5) makes the actual named-dataset decision.
+# single-cell atlas with a T-cell compartment). Used only as placeholder
+# content until the real experiment designer (agent 7, Phase 5) makes the
+# actual named-dataset decision.
 _DEFAULT_DATASET = "Tabula Sapiens (immune compartment)"
 _DEFAULT_DATASET_POINTER = "https://tabula-sapiens-portal.ds.czbiohub.org/"
 
 
 class TransBenchState(TypedDict, total=False):
-    """State threaded through the graph. Phase 1 populates/reads only what the
-    stub node needs; Phases 2-5 add decompose/hypothesize/retrieve/grade/
-    novelty/rigor/design outputs (axes, hypotheses, evidence, references,
-    contradictions, ...) to this same dict rather than introducing a parallel
-    state shape.
+    """State threaded through the graph. Phases 1-2 populate/read
+    observation/focus_drug/.../axes/hypotheses; Phases 3-5 add retrieve/
+    grade/novelty/rigor/design outputs (evidence, references,
+    contradictions, ...) to this same dict rather than a parallel shape.
     """
 
     observation: str
@@ -46,45 +54,97 @@ class TransBenchState(TypedDict, total=False):
     model_reasoning: str
     model_cheap: str
     retrieval_snapshot: Optional[dict]
+    axes: list[DecomposedAxis]
+    hypotheses: list[Hypothesis]
     brief: TransBrief
 
 
-def _stub_node(state: TransBenchState) -> TransBenchState:
-    """Phase-1 placeholder node: echoes the input into a schema-valid
-    ``TransBrief``. No LLM calls, no retrieval, nothing read from or written
-    to Iatronix — agents 1-8 (BUILD_SPEC.md §5) replace this node's guts
-    across Phases 2-5; the graph topology grows around it, this function does
-    not survive past Phase 1 in its current form.
+async def _decompose_node(state: TransBenchState) -> TransBenchState:
+    """Agent 1 — Decomposer (Haiku, ``config.MODEL_CHEAP``). Real LLM call —
+    builds its own temperature-0 client via :func:`agents.build_llm` for
+    this one call (BUILD_SPEC.md §5: "Build clients once")."""
+    llm = agents.build_llm(
+        state.get("model_cheap", config.MODEL_CHEAP),
+        state.get("user_key"),
+        state.get("user_provider", "anthropic"),
+    )
+    axes = await agents.run_decompose(
+        {"observation": state["observation"], "focus_drug": state.get("focus_drug")},
+        llm,
+    )
+    return {**state, "axes": axes}
+
+
+async def _hypothesize_node(state: TransBenchState) -> TransBenchState:
+    """Agent 2 — Hypothesis Generator (Sonnet, ``config.MODEL_REASONING``).
+    Real LLM call — grounded in agent 1's axes output."""
+    llm = agents.build_llm(
+        state.get("model_reasoning", config.MODEL_REASONING),
+        state.get("user_key"),
+        state.get("user_provider", "anthropic"),
+    )
+    hypotheses = await agents.run_hypothesize(
+        {
+            "observation": state["observation"],
+            "focus_drug": state.get("focus_drug"),
+            "axes": state.get("axes", []),
+            "max_hypotheses": state.get("max_hypotheses", config.MAX_HYPOTHESES),
+        },
+        llm,
+    )
+    return {**state, "hypotheses": hypotheses}
+
+
+def _assemble_placeholder_node(state: TransBenchState) -> TransBenchState:
+    """Assembles the ``TransBrief`` from REAL axes (agent 1) and REAL
+    hypotheses (agent 2). Evidence/grading/novelty/rigor/experiment/assembly
+    (agents 3-8) are not wired yet (Phases 3-5) — each hypothesis is wrapped
+    in a placeholder ``GradedHypothesis`` that HONESTLY reflects that: empty
+    evidence, ``novelty="unsupported"`` (schema-valid; ``novelty_reason``
+    explains why), ``grounded=False`` (correctly means the Phase 4 rigor gate
+    would exclude these from experiment design if that stage ran). No LLM
+    calls happen in this function itself — it only assembles prior nodes'
+    real output into the final schema.
     """
     observation = state["observation"]
     focus_drug = state.get("focus_drug")
+    axes = state.get("axes", [])
+    hypotheses = state.get("hypotheses", [])
 
-    axes = [
-        DecomposedAxis(
-            axis="other",
-            rationale=(
-                "Phase 1 skeleton stub — no decomposition agent wired yet "
-                "(BUILD_SPEC.md §5 agent 1 / Decomposer lands in Phase 2)."
+    graded_hypotheses = [
+        GradedHypothesis(
+            hypothesis=h,
+            evidence=[],
+            supporting_count=0,
+            contradicting_count=0,
+            novelty="unsupported",
+            novelty_reason=(
+                "Phase 2: no evidence retrieval/grading has run yet for this "
+                "hypothesis (BUILD_SPEC.md §5 agents 3-6 — Evidence Retriever, "
+                "Grader, Novelty Checker, Rigor Gate — land in Phases 3-4). "
+                "This verdict is a placeholder, not a real novelty assessment."
             ),
-            key_entities=[focus_drug] if focus_drug else [],
+            confidence="low",
+            grounded=False,
         )
+        for h in hypotheses
     ]
 
     top_experiment = ExperimentPlan(
-        hypothesis_id="stub-0",
-        question="Phase 1 placeholder — no experiment designer wired yet.",
+        hypothesis_id=hypotheses[0].id if hypotheses else "stub-0",
+        question="Phase 2 placeholder — no experiment designer wired yet.",
         dataset=_DEFAULT_DATASET,
         dataset_pointer=_DEFAULT_DATASET_POINTER,
         method="Not yet designed (BUILD_SPEC.md §5 agent 7 / Experiment Designer lands in Phase 5).",
-        protocol_steps=["Phase 1 stub — placeholder step; no real protocol has been designed."],
-        confirm_if="N/A — stub.",
-        refute_if="N/A — stub.",
-        feasibility_notes="Stub TransBrief: no real experiment design has run yet.",
-        claude_science_prompt="N/A — stub.",
+        protocol_steps=["Phase 2 placeholder — no real protocol has been designed yet."],
+        confirm_if="N/A — not yet designed.",
+        refute_if="N/A — not yet designed.",
+        feasibility_notes="Placeholder TransBrief: no real experiment design has run yet.",
+        claude_science_prompt="N/A — not yet designed.",
     )
 
     run_manifest = {
-        "phase": "1-skeleton-stub",
+        "phase": "2-agents-1-2",
         "reuse_source": REUSE_SOURCE,
         "model_reasoning": state.get("model_reasoning", config.MODEL_REASONING),
         "model_cheap": state.get("model_cheap", config.MODEL_CHEAP),
@@ -99,15 +159,17 @@ def _stub_node(state: TransBenchState) -> TransBenchState:
     brief = TransBrief(
         request_echo=observation,
         axes=axes,
-        hypotheses=[],
+        hypotheses=graded_hypotheses,
         top_experiment=top_experiment,
         references=[],
         contradictions_surfaced=[],
         uncertainty_note=(
-            "Phase 1 skeleton stub: no real decomposition, hypothesis "
-            "generation, retrieval, grading, novelty, rigor, or experiment "
-            "design has run. This brief only proves the schema contract end "
-            "to end (KICKOFF.md Phase 1 acceptance)."
+            "Phase 2: decomposition (agent 1) and hypothesis generation "
+            "(agent 2) are real LLM output. Evidence retrieval, grading, "
+            "novelty classification, the rigor gate, experiment design, and "
+            "final brief assembly (agents 3-8) have not run yet — those land "
+            "in Phases 3-5. Treat every hypothesis below as ungrounded until "
+            "then."
         ),
         run_manifest=run_manifest,
     )
@@ -115,13 +177,19 @@ def _stub_node(state: TransBenchState) -> TransBenchState:
 
 
 def build_graph():
-    """Compile the (currently single-node) ``StateGraph``. Pure graph
-    construction — no LLM client is built and no network/DB call happens
-    here, so this is cheap and safe to call more than once."""
+    """Compile the ``StateGraph``: ``START -> decompose -> hypothesize ->
+    assemble_placeholder -> END``. Pure graph construction — no LLM client is
+    built at compile time (clients are built per-call inside the async
+    decompose/hypothesize nodes, using that call's own ``user_key``), so this
+    is cheap and safe to call more than once."""
     graph = StateGraph(TransBenchState)
-    graph.add_node("stub", _stub_node)
-    graph.add_edge(START, "stub")
-    graph.add_edge("stub", END)
+    graph.add_node("decompose", _decompose_node)
+    graph.add_node("hypothesize", _hypothesize_node)
+    graph.add_node("assemble_placeholder", _assemble_placeholder_node)
+    graph.add_edge(START, "decompose")
+    graph.add_edge("decompose", "hypothesize")
+    graph.add_edge("hypothesize", "assemble_placeholder")
+    graph.add_edge("assemble_placeholder", END)
     return graph.compile()
 
 
@@ -142,10 +210,14 @@ async def run_transbench_graph(
 ) -> TransBrief:
     """Run the compiled graph and return the resulting ``TransBrief``.
 
-    Phase 1: a single stub node, no LLM/network/DB calls. ``user_key`` is
-    accepted and threaded into state for interface stability across phases —
-    it is unused until Phase 2 wires real ``create_llm(..., user_key=...)``
-    calls (BUILD_SPEC.md §0.4 BYOK).
+    Phase 2: decompose + hypothesize make REAL Anthropic calls via
+    ``agents.build_llm(...).bind(temperature=0)`` + ``await llm.ainvoke(...)``
+    (BUILD_SPEC.md §5/§0.7). ``user_key`` MUST be a usable BYOK key for this
+    to succeed — ``engine.run_transbench`` falls back to
+    ``config.ANTHROPIC_API_KEY`` (the process env) when the caller doesn't
+    pass one explicitly (BUILD_SPEC.md §0.4). A missing/invalid key surfaces
+    as :class:`transbench.agents.TransBenchLLMError`, not a raw
+    ``fastapi.HTTPException``.
     """
     initial_state: TransBenchState = {
         "observation": observation,
