@@ -1,37 +1,32 @@
 """Phase 2 acceptance test (KICKOFF.md Phase 2 / BUILD_SPEC.md §5).
 
 REAL Anthropic API call test — requires a working ``ANTHROPIC_API_KEY`` in
-the environment (skips cleanly, with a clear reason, if absent). Runs the
-FLAGSHIP observation through the real Decomposer (agent 1, Haiku) +
-Hypothesis Generator (agent 2, Sonnet) via the full ``run_transbench()``
-pipeline — exactly ONE flagship pass (2 real LLM calls total: 1 decompose +
-1 hypothesize), per the phase's spend-limiting instruction. Downstream
-stages (agents 3-8: retrieve/grade/novelty/rigor/design/assemble) are still
-Phase-1/2-style placeholders until Phase 3+ — this test only asserts on
-``axes``/``hypotheses``.
+the environment (skips cleanly, with a clear reason, if absent). Asserts on
+the real Decomposer (agent 1, Haiku) + Hypothesis Generator (agent 2,
+Sonnet) output of a full flagship ``run_transbench()`` pipeline run.
+
+Phase 7 update: this file originally called
+``asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))`` itself. As of Phase 5
+the graph is COMPLETE end to end (agents 1-8), so that was actually a full
+~13-call live pipeline run every time this file ran — not the "2 calls"
+this docstring originally (Phase-2-era) claimed, and redundant with the
+other acceptance tests that also each independently ran the identical
+flagship pipeline. It now consumes the shared, session-scoped
+``flagship_brief`` fixture (``tests/conftest.py``) instead — the SAME real
+brief every other live test in this suite shares, at zero incremental
+spend (KICKOFF.md Phase 7 spend directive). This file's own assertions
+(agents 1-2's contract) are unchanged.
 """
 from __future__ import annotations
 
-import asyncio
-import os
-
-import pytest
-
-from tests.fixtures import FLAGSHIP_OBSERVATION
-from transbench.engine import run_transbench
-from transbench.schemas import Axis
-
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="Phase 2 acceptance test makes a REAL Anthropic API call; requires a working ANTHROPIC_API_KEY.",
-)
+from transbench.schemas import Axis, TransBrief
 
 _VALID_AXES = set(Axis.__args__)  # type: ignore[attr-defined]
 
 
-def test_flagship_decompose_and_hypothesize_real_llm_calls() -> None:
-    """Real end-to-end call: flagship -> decompose -> hypothesize."""
-    brief = asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))
+def test_flagship_decompose_and_hypothesize_real_llm_calls(flagship_brief: TransBrief) -> None:
+    """Real end-to-end call (shared fixture): flagship -> decompose -> hypothesize."""
+    brief = flagship_brief
 
     # --- Agent 1: Decomposer (Haiku) ---
     axis_names = [a.axis for a in brief.axes]
@@ -52,15 +47,17 @@ def test_flagship_decompose_and_hypothesize_real_llm_calls() -> None:
         assert h.prediction.strip(), f"hypothesis {h.id} has an empty (non-falsifiable) prediction"
         assert h.axis in _VALID_AXES, f"hypothesis {h.id} has an invalid axis {h.axis!r}"
 
-    # --- Downstream rigor/novelty stages must still be honestly labeled as
-    # not-yet-run (Phase 4+). Note: as of Phase 3, `evidence` IS legitimately
-    # populated (retrieve+grade now run in this same pipeline) -- this test
-    # only gates agents 1-2's own contract, so it no longer asserts
-    # `evidence == []` (that was Phase 2's placeholder-era expectation, not a
-    # real invariant of decompose/hypothesize). See test_retrieval_phase3.py
-    # for the agent 3-4 evidence assertions.
-    for gh in brief.hypotheses:
-        assert gh.grounded is False
+    # This file only gates agents 1-2's OWN contract (axes/hypotheses shape),
+    # not downstream grounding -- the pipeline behind the shared
+    # `flagship_brief` fixture is the REAL, COMPLETE Phase-5 graph (agents
+    # 1-8), so `evidence`/`grounded` are legitimately populated real
+    # signals here, not placeholders. (Phase 7 fix: this file previously
+    # asserted `gh.grounded is False` for EVERY hypothesis unconditionally --
+    # correct back when agents 3-8 were still stubs, but false once Phase 5
+    # completed the graph: a healthy flagship run is EXPECTED to ground at
+    # least one hypothesis, per test_retrieval_phase3.py's own
+    # `any_grounded` assertion. See test_retrieval_phase3.py/test_cost.py
+    # for the real agent 3-8 grounding/cost assertions.)
 
     # Printed (not asserted) so a human can eyeball scientific sanity, per the
     # coordinator's request — visible with `pytest -q -s`.

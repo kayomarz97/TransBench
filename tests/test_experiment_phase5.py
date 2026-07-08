@@ -76,11 +76,9 @@ from types import SimpleNamespace
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
-import anthropic
 import httpx
 import pytest
 
-from tests.fixtures import FLAGSHIP_OBSERVATION
 from transbench import agents, config
 from transbench.agents import (
     TransBenchLLMError,
@@ -92,7 +90,6 @@ from transbench.agents import (
     run_design_experiment,
     run_retrieve,
 )
-from transbench.engine import run_transbench
 from transbench.reuse import EvidenceFetchResult, FetchedData, build_article_registry
 from transbench.rigor import select_experiment_candidate
 from transbench.schemas import EvidenceItem, GradedHypothesis, Hypothesis, Reference, TransBrief
@@ -1093,49 +1090,35 @@ def test_token_spend_session_accumulates_across_calls_and_resets_after() -> None
 
 # ---------------------------------------------------------------------------
 # Live: exactly ONE flagship pass through the full 8-agent pipeline.
+#
+# Phase 7 update: this test originally owned its own private
+# retry-once-on-transient-500 helper and called
+# ``asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))`` itself. It now
+# consumes the shared, session-scoped ``flagship_brief`` fixture
+# (``tests/conftest.py``, same retry-once policy) instead -- the SAME real
+# flagship brief every other live test in this suite shares, at zero
+# incremental spend (KICKOFF.md Phase 7 spend directive). This test's own
+# assertions are unchanged.
 # ---------------------------------------------------------------------------
-
-_TRANSIENT_EXCEPTION_TYPES = (anthropic.APIConnectionError, anthropic.InternalServerError)
-
-
-def _is_transient_anthropic_failure(exc: BaseException) -> bool:
-    if isinstance(exc, _TRANSIENT_EXCEPTION_TYPES):
-        return True
-    if getattr(exc, "status_code", None) == 500:
-        return True
-    message = str(exc).lower()
-    return "internal server error" in message or "overloaded" in message or " 500 " in f" {message} "
-
-
-def _run_flagship_with_retry() -> TransBrief:
-    """Retries EXACTLY ONCE on a transient-looking Anthropic failure (a bare
-    500/connection drop) -- a non-transient exception, or a second
-    consecutive failure of any kind, still propagates."""
-    try:
-        return asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))
-    except Exception as exc:  # noqa: BLE001 -- narrowed immediately below
-        if not _is_transient_anthropic_failure(exc):
-            raise
-        return asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))
 
 
 @pytest.mark.skipif(
     not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="Phase 5 acceptance test makes REAL Anthropic + PubMed API calls; requires a working ANTHROPIC_API_KEY.",
+    reason="Phase 5 acceptance test needs the REAL flagship_brief fixture, which requires ANTHROPIC_API_KEY.",
 )
-def test_flagship_experiment_plan_and_full_brief() -> None:
-    """Real end-to-end call: the full 8-agent pipeline for the flagship
-    observation. Asserts a candidate is selected, its ExperimentPlan names a
-    dataset whose FINAL dataset_pointer is INDEPENDENTLY RE-VERIFIED (a
-    fresh, real NCBI network call in THIS test, not merely trusting that
-    run_design_experiment's own internal gate ran -- Opus verification
-    finding: a host-only check is not enough, an accession can resolve
-    while describing a completely different dataset) to actually resolve to
-    a dataset consistent with the plan's own claims -- either the model's
-    own accession genuinely verified, or the guaranteed-resolvable Tabula
-    Sapiens fallback. The full TransBrief validates, and the BUILD_SPEC.md
-    §9 retrieval snapshot is populated."""
-    brief = _run_flagship_with_retry()
+def test_flagship_experiment_plan_and_full_brief(flagship_brief: TransBrief) -> None:
+    """Real end-to-end call (shared fixture): the full 8-agent pipeline for
+    the flagship observation. Asserts a candidate is selected, its
+    ExperimentPlan names a dataset whose FINAL dataset_pointer is
+    INDEPENDENTLY RE-VERIFIED (a fresh, real NCBI network call in THIS test,
+    not merely trusting that run_design_experiment's own internal gate ran
+    -- Opus verification finding: a host-only check is not enough, an
+    accession can resolve while describing a completely different dataset)
+    to actually resolve to a dataset consistent with the plan's own claims
+    -- either the model's own accession genuinely verified, or the
+    guaranteed-resolvable Tabula Sapiens fallback. The full TransBrief
+    validates, and the BUILD_SPEC.md §9 retrieval snapshot is populated."""
+    brief = flagship_brief
 
     revalidated = TransBrief.model_validate(brief.model_dump())
     assert revalidated == brief

@@ -57,61 +57,35 @@ specific brief is a Phase-5/7 concern (BUILD_SPEC.md §9): pass
 PMIDs+abstracts instead of hitting PubMed again — this live flagship test is
 deliberately NOT that; it is proving the live path works, which by
 definition cannot be made deterministic without disabling the thing it's
-testing.
+testing (see ``tests/test_mcp_parity.py`` for the dedicated
+snapshot-determinism proof).
+
+Phase 7 update: this file originally owned its own private
+retry-once-on-transient-500 helper and called
+``asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))`` itself. It now
+consumes the shared, session-scoped ``flagship_brief`` fixture
+(``tests/conftest.py``, same retry-once policy) instead — the SAME real
+flagship brief every other live test in this suite shares, at zero
+incremental spend (KICKOFF.md Phase 7 spend directive: "keep total NEW live
+runs to ≤2-3"). This file's own assertions are unchanged.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 
-import anthropic
 import pytest
 
-from tests.fixtures import FLAGSHIP_OBSERVATION
-from transbench.engine import run_transbench
 from transbench.rigor import select_experiment_candidate
-from transbench.schemas import EvidenceGrade
+from transbench.schemas import EvidenceGrade, TransBrief
 
+# Redundant with (but a clearer, file-local signal alongside) the shared
+# `flagship_brief` fixture's own internal skip -- matches every sibling live
+# test file's convention.
 pytestmark = pytest.mark.skipif(
     not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="Phase 3/4 acceptance test makes REAL Anthropic + PubMed API calls; requires a working ANTHROPIC_API_KEY.",
+    reason="Phase 3/4 acceptance test needs the REAL flagship_brief fixture, which requires ANTHROPIC_API_KEY.",
 )
-
-# Anthropic intermittently throws transient 500s/connection drops that are
-# infra noise, not a code regression -- retried EXACTLY ONCE below (never
-# silently retried forever, so a genuine regression still fails loudly).
-_TRANSIENT_EXCEPTION_TYPES = (anthropic.APIConnectionError, anthropic.InternalServerError)
-
-
-def _is_transient_anthropic_failure(exc: BaseException) -> bool:
-    """True iff ``exc`` looks like a transient Anthropic-side failure (a bare
-    500 / connection drop / overload) rather than a real bug. Matches the
-    exact SDK exception types for those cases, plus a defensive
-    status_code/message sniff for anything a wrapping layer (langchain-
-    anthropic) re-raises one level removed from the raw SDK type."""
-    if isinstance(exc, _TRANSIENT_EXCEPTION_TYPES):
-        return True
-    if getattr(exc, "status_code", None) == 500:
-        return True
-    message = str(exc).lower()
-    return "internal server error" in message or "overloaded" in message or " 500 " in f" {message} "
-
-
-def _run_flagship_with_retry():
-    """Run the flagship observation through the full pipeline, retrying
-    EXACTLY ONCE if the first attempt's failure looks transient (see
-    :func:`_is_transient_anthropic_failure`) -- a non-transient exception, or
-    a second consecutive failure of any kind, still propagates and fails the
-    test (this must never mask a real regression, only real Anthropic
-    infra flakiness)."""
-    try:
-        return asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))
-    except Exception as exc:  # noqa: BLE001 -- narrowed immediately below
-        if not _is_transient_anthropic_failure(exc):
-            raise
-        return asyncio.run(run_transbench(FLAGSHIP_OBSERVATION))
-
 
 _PMID_RE = re.compile(r"^\d+$")
 _VALID_GRADES = set(EvidenceGrade.__args__)  # type: ignore[attr-defined]
@@ -125,13 +99,13 @@ _RESOLVABLE_URL_PREFIXES = (
 )
 
 
-def test_flagship_grounds_end_to_end_without_requiring_every_hypothesis_to() -> None:
-    """Real end-to-end call: flagship -> decompose -> hypothesize -> (per
-    hypothesis) retrieve -> grade -> entailment/grounding -> novelty. See
-    the module docstring for why the per-hypothesis bar is "no crash + only
-    real citations when any are made" rather than "every fresh hypothesis
-    must find literature"."""
-    brief = _run_flagship_with_retry()  # must not raise (a lone transient 500 is retried once)
+def test_flagship_grounds_end_to_end_without_requiring_every_hypothesis_to(flagship_brief: TransBrief) -> None:
+    """Real end-to-end call (shared fixture): flagship -> decompose ->
+    hypothesize -> (per hypothesis) retrieve -> grade -> entailment/grounding
+    -> novelty. See the module docstring for why the per-hypothesis bar is
+    "no crash + only real citations when any are made" rather than "every
+    fresh hypothesis must find literature"."""
+    brief = flagship_brief
 
     assert len(brief.hypotheses) >= 1
 
