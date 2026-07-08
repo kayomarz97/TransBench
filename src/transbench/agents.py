@@ -442,6 +442,12 @@ _QUERY_STOPWORDS = frozenset(
         # ``_PLAIN_WORD_RE`` splits a hyphenated compound into ("pro-
         # inflammatory" -> "pro" + "inflammatory"; "anti-X" -> "anti" + "X").
         "clonal", "expansion", "gain", "pro", "anti",
+        # Round 3 (Phase 4 flagship-log review): connective adverbs a
+        # hypothesis-generator LLM uses to link clauses -- zero search
+        # signal on their own, same failure class as "chronic"/"clonally"
+        # above (measured live: "hypertension SLCO1B1 Concurrently" was one
+        # of the queries that hit evidence-floor exhaustion).
+        "concurrently", "subsequently", "additionally", "consequently",
     }
 )
 # Symbol-SHAPED tokens that are nonetheless too GENERIC to anchor a search
@@ -585,21 +591,21 @@ def _entity_pubmed_query(
        -drug observations, so this is always a real, in-domain term,
        typically "hypertension").
     1. Gene/pathway-SYMBOL-like token(s) scanned directly out of ``neutral``
-       (see ``_SYMBOL_RE`` above), capped at ``max_symbols`` (default 2) —
-       the most reliable, specific anchors a hypothesis statement contains
-       (NLRP3, SLC12A3, WNK4, NCC, eNOS, ACE, CD8, ADMA, DDAH2, ...), and the
-       ones ``neutralize_query``'s own extraction most reliably MISSES,
-       especially via its heuristic timeout-fallback path (measured live:
-       that fallback's own entity list for a real hypothesis was just
+       (see ``_SYMBOL_RE`` above), capped at ``max_symbols`` (default 1) —
+       the most reliable, specific anchor a hypothesis statement contains
+       (NLRP3, SLC12A3, WNK4, NCC, eNOS, CD8, ADMA, TRPV4, ...), and the one
+       ``neutralize_query``'s own extraction most reliably MISSES, especially
+       via its heuristic timeout-fallback path (measured live: that
+       fallback's own entity list for a real hypothesis was just
        ``["Chronic"]`` — a sentence-initial capitalized common word, not a
        real entity at all; its regex structurally cannot match an
-       ALL-CAPS/digit token like "NLRP3"). Capped at 2 (not unbounded) —
-       stacking 3-4 symbols together (with no anchor to anchor them)
-       previously found nothing; with the anchor now occupying its own
-       GUARANTEED slot, up to 2 symbols alongside it consistently performed
-       at least as well as 1 and sometimes better (a 2nd real symbol, e.g.
-       DDAH2 alongside ADMA, reliably beat a generic sentence word filling
-       that same slot).
+       ALL-CAPS/digit token like "NLRP3"). Capped at just 1 (not several) —
+       stacking multiple symbols together, even alongside the now-guaranteed
+       anchor, was measured to let a second, GENERIC symbol-shaped
+       abbreviation (e.g. "ACE"/"CRP"/"IFN" — see ``_GENERIC_SYMBOLS`` below)
+       crowd out the hypothesis's real distinguishing term; a single
+       specific symbol plus a content-word-derived second concept performed
+       more reliably across real hypotheses than stacking symbols.
     2. ``neutralize_query``'s own ``stance.entities`` (drug/disease names) —
        filtered through the same stopword/generic-modifier/length check
        (:func:`_is_high_signal_term`) so a heuristic-fallback artifact like
