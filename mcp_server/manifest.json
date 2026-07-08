@@ -1,0 +1,72 @@
+{
+  "_comment": "Descriptive connector manifest for humans/registration tooling — not a normative MCP protocol file. The live, authoritative tool schemas are served at runtime by mcp_server/server.py itself (FastMCP introspects the @mcp_app.tool()-decorated function signatures/docstrings).",
+  "name": "transbench",
+  "version": "0.1.0",
+  "description": "TransBench -- a translational clinician<->bench research agent. Decomposes a clinical observation about antihypertensive drugs into biological axes, generates up to 3 falsifiable mechanistic hypotheses, grounds each in retrieved PubMed evidence (support + contradiction), applies a novelty guard (established/open_question/unsupported) so textbook facts are never shipped as novel, and designs ONE reproducible computational experiment naming a concrete, resolvable public dataset plus a claude_science_prompt. Research tool only -- never diagnosis, drug selection, or dosing advice; every response carries a fixed disclaimer.",
+  "repo": "/root/projects/transbench",
+  "engine_entrypoint": "transbench.engine.run_transbench",
+  "sdk": {
+    "package": "mcp",
+    "verified_version": "1.28.1",
+    "python_requires": ">=3.11"
+  },
+  "process": {
+    "module": "mcp_server.server",
+    "stdio_command": ["/root/projects/transbench/.venv/bin/python", "-m", "mcp_server.server"],
+    "cwd": "/root/projects/transbench",
+    "run_scripts": {
+      "stdio": "mcp_server/run_stdio.sh",
+      "http": "mcp_server/run_http.sh"
+    }
+  },
+  "transports": {
+    "stdio": {
+      "default": true,
+      "note": "the transport Claude Science spawns per CLAUDE_SCIENCE_SETUP.md Step 4"
+    },
+    "http": {
+      "sdk_transport": "streamable-http",
+      "host": "127.0.0.1",
+      "port": 8500,
+      "path": "/mcp",
+      "note": "demo-day fallback only (CLAUDE_SCIENCE_SETUP.md); also try sdk_transport=sse if a client only speaks the older SSE transport -- both are supported by mcp==1.28.1"
+    }
+  },
+  "env": {
+    "required": {
+      "ANTHROPIC_API_KEY": "BYOK key for the ENGINE's own Anthropic calls (create_llm user_key) -- independent of Claude Science, which is only this tool's MCP client."
+    },
+    "optional": {
+      "PUBMED_API_KEY": "raises NCBI/PubMed rate limits",
+      "MCP_TRANSPORT": "stdio | sse | streamable-http (default: stdio)",
+      "MCP_HTTP_HOST": "default: 127.0.0.1",
+      "MCP_HTTP_PORT": "default: 8500"
+    },
+    "always_set_by_run_scripts": {
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONPATH": "/root/projects/transbench/src"
+    }
+  },
+  "tools": [
+    {
+      "name": "generate_experiment",
+      "summary": "The showpiece. Full grounded TransBrief incl. one runnable computational experiment.",
+      "input_schema": {
+        "observation": {"type": "string", "required": true, "minLength": 3, "maxLength": 8000},
+        "focus_drug": {"type": "string", "required": false, "default": ""}
+      },
+      "returns": "TransBrief (see src/transbench/schemas.py) on success; {error, message, status_code} on failure",
+      "cost_note": "~13 LLM calls + live PubMed + live GEO verification per invocation (BUILD_SPEC.md §9)"
+    },
+    {
+      "name": "search_grounded_evidence",
+      "summary": "Utility/fallback. Same engine run as generate_experiment, reshaped into a lighter grounded-evidence projection (no axes/top_experiment/run_manifest).",
+      "input_schema": {
+        "question": {"type": "string", "required": true, "minLength": 3, "maxLength": 8000}
+      },
+      "returns": "{request_echo, hypotheses[{...,evidence[]}], references[], contradictions_surfaced[], uncertainty_note, disclaimer} on success; {error, message, status_code} on failure",
+      "cost_note": "same cost as generate_experiment -- it is the same full pipeline, only the RETURNED shape is lighter"
+    }
+  ],
+  "disclaimer": "Research hypothesis generation only. Not clinical, diagnostic, or prescribing advice."
+}
