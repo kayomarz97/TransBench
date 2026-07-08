@@ -1,0 +1,29 @@
+[project]
+name = "transbench"
+version = "0.1.0"
+description = "TransBench -- translational clinician<->bench agent, shipped as an MCP connector for Claude Science. Reuses the Iatronix backend read-only."
+requires-python = ">=3.11"
+dependencies = [
+    "iatronix-backend",
+    "mcp",
+    "langgraph",
+    "langchain",
+    "langchain-anthropic",
+    "langchain-core",
+    "anthropic",
+    "httpx",
+    "pydantic>=2",
+    "pydantic-settings",
+    "pyyaml",
+    "fastapi",
+    "json-repair",
+    "tenacity",
+]
+
+[tool.uv.sources]
+iatronix-backend = { path = "/root/projects/med-ai-project/backend", editable = true }
+
+[dependency-groups]
+# Test tooling only -- deliberately NOT in [project].dependencies (BUILD_SPEC §1's
+# curated runtime list is exact/frozen). Needed to run tests/*.py per Phase 0/7 acceptance.
+dev = ["pytest", "pytest-asyncio"]
