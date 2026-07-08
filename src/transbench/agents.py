@@ -818,12 +818,33 @@ async def run_retrieve(
 # ---------------------------------------------------------------------------
 
 
-def _article_prompt_block(article: dict) -> str:
-    pmid = article.get("pmid")
+def _article_prompt_block(key: str, article: dict) -> str:
     year = article.get("year")
     title = (article.get("title") or "").strip()
     abstract = (article.get("abstract") or "").strip()[:1200]
-    return f"- pmid={pmid} year={year}\n  title: {title}\n  abstract: {abstract}"
+    return f"- pmid={key} year={year}\n  title: {title}\n  abstract: {abstract}"
+
+
+def _resolution_key(registry_entry: Any) -> str:
+    """The internal correlation id used for ONE ranked article throughout
+    ``run_grade`` — shown to the grader LLM under the (unchanged)
+    ``EVIDENCE_GRADER_SYSTEM_PROMPT``'s ``"pmid"`` JSON field, and used to
+    match its response back to the right article. A real pmid when the
+    REGISTRY ENTRY has one (the common case — preserves existing behavior/
+    prompt semantics unchanged for PubMed abstracts); otherwise the
+    registry's own ``nct_id``/``doi``/``ref_token`` (always present, always
+    unique), in that preference order, for ClinicalTrials.gov/DOI-only/
+    title-only-matched entries that have no pmid at all. This is PURELY an
+    internal correlation id — the final ``EvidenceItem.reference.pmid`` is
+    always built directly from ``registry_entry.pmid`` (may genuinely stay
+    ``None``), never from this key.
+    """
+    return (
+        registry_entry.pmid
+        or registry_entry.nct_id
+        or registry_entry.doi
+        or registry_entry.ref_token
+    )
 
 
 async def run_grade(
@@ -845,9 +866,18 @@ async def run_grade(
 
     Steps (BUILD_SPEC.md §5 agent 4, exactly):
       1. Resolve each ``ranked`` article's citable ``Reference`` via
-         ``registry.by_pmid[str(pmid)]``; drop any article with no registry
-         match (no resolvable citation) — done HERE, not in agent 3, per
-         BUILD_SPEC.md §5's division of labor.
+         ``registry.lookup_id(pmid=, nct_id=, doi=, title=)`` (Opus review —
+         resolves via pmid OR nct_id OR doi OR title, not pmid alone: the
+         original pmid-only ``registry.by_pmid[...]`` lookup silently
+         dropped every ClinicalTrials.gov result — which carries an
+         ``nct_id``, not a ``pmid`` — before it ever reached grading, even
+         though it is real, resolvable, citable evidence and often the
+         HIGHEST-grade evidence available, e.g. an RCT registered on
+         ClinicalTrials.gov). Drop any article with no registry match at all
+         (no resolvable citation via any of pmid/nct_id/doi/title) — done
+         HERE, not in agent 3, per BUILD_SPEC.md §5's division of labor.
+         See :func:`_resolution_key` for how a pmid-less item is still given
+         a stable identifier to correlate through the LLM call below.
       2. ONE batched Haiku call over all resolvable abstracts (never one call
          per abstract) -> ``bears_on_hypothesis``/``supports``/``grade``/
          ``claim_fragment`` per pmid. ``grade`` is case-insensitively
@@ -886,8 +916,8 @@ async def run_grade(
     Phase-4 batched-entailment pass (rigor.py). Phase 4 overwrites this field
     with real per-item verdicts.
 
-    Never invents a pmid that wasn't in ``ranked``. Returns ``[]`` (not an
-    error) if ``ranked`` is empty or nothing resolves/validates/grades —
+    Never invents a citation that wasn't in ``ranked``. Returns ``[]`` (not
+    an error) if ``ranked`` is empty or nothing resolves/validates/grades —
     zero evidence for a hypothesis is a valid outcome, handled by the (future)
     rigor gate, not a crash here.
     """
@@ -895,18 +925,19 @@ async def run_grade(
         return []
 
     resolvable: dict[str, tuple[dict, Any]] = {}
-    registry_by_pmid = getattr(registry, "by_pmid", {}) or {}
     for article in ranked:
-        pmid = article.get("pmid")
-        if not pmid:
-            continue
-        pmid = str(pmid)
-        if pmid in resolvable:
-            continue  # dedupe (support + contradiction passes can overlap)
-        registry_entry = registry_by_pmid.get(pmid)
+        registry_entry = registry.lookup_id(
+            pmid=article.get("pmid"),
+            nct_id=article.get("nct_id"),
+            doi=article.get("doi"),
+            title=article.get("title"),
+        )
         if registry_entry is None:
-            continue  # no resolvable citation — drop (BUILD_SPEC §5 agent 4)
-        resolvable[pmid] = (article, registry_entry)
+            continue  # no resolvable citation via pmid/nct_id/doi/title — drop
+        key = _resolution_key(registry_entry)
+        if key in resolvable:
+            continue  # dedupe (support + contradiction passes can overlap)
+        resolvable[key] = (article, registry_entry)
 
     if not resolvable:
         return []
@@ -917,29 +948,29 @@ async def run_grade(
             f"Hypothesis: {hypothesis.statement}",
             f"Prediction: {hypothesis.prediction}",
             "Abstracts:",
-            *[_article_prompt_block(article) for article, _ in resolvable.values()],
+            *[_article_prompt_block(key, article) for key, (article, _) in resolvable.items()],
         ]
     )
     parsed = await _ainvoke_json(llm, EVIDENCE_GRADER_SYSTEM_PROMPT, user_content)
     raw_items = _coerce_list(parsed, preferred_key="items")
 
-    candidates: list[tuple[EvidenceItem, dict]] = []
+    candidates: list[tuple[str, EvidenceItem, dict]] = []
     for item in raw_items:
         if not isinstance(item, dict):
             logger.warning("grade: skipping non-dict grading item %r", item)
             continue
-        pmid = str(item.get("pmid", ""))
-        pair = resolvable.get(pmid)
+        key = str(item.get("pmid", ""))
+        pair = resolvable.get(key)
         if pair is None:
-            logger.warning("grade: skipping item with unresolvable/invented pmid %r", pmid)
+            logger.warning("grade: skipping item with unresolvable/invented id %r", key)
             continue
         article, registry_entry = pair
 
         if not _coerce_bool(item.get("bears_on_hypothesis")):
             logger.info(
-                "grade: dropping off-topic abstract pmid=%s (bears_on_hypothesis=false) — "
+                "grade: dropping off-topic abstract id=%s (bears_on_hypothesis=false) — "
                 "never emitted as supporting or contradicting",
-                pmid,
+                key,
             )
             continue
 
@@ -947,7 +978,7 @@ async def run_grade(
         _normalize_enum_field(item, "grade", _GRADE_VALUES)
         grade = item.get("grade")
         if grade not in _GRADE_VALUES:
-            logger.warning("grade: skipping item %r with invalid grade %r", pmid, item.get("grade"))
+            logger.warning("grade: skipping item %r with invalid grade %r", key, item.get("grade"))
             continue
 
         claim_fragment = str(item.get("claim_fragment") or "").strip() or (article.get("title") or "")[:200]
@@ -973,8 +1004,9 @@ async def run_grade(
             "source": reference.source,
             "pmid": reference.pmid,
             "confidence": "moderate",
+            "_key": key,  # internal correlation id -- validate_citations ignores unknown keys
         }
-        candidates.append((evidence_item, claim_dict))
+        candidates.append((key, evidence_item, claim_dict))
 
     if not candidates:
         return []
@@ -987,23 +1019,26 @@ async def run_grade(
                 "source": ev.reference.source,
                 "title": ev.reference.title,
                 "year": ev.reference.year,
+                "_key": key,  # internal correlation id (see _resolution_key) -- NCT/DOI-only
+                # items have reference.pmid=None, so `pmid` alone can't be the reconciliation
+                # key below; validate_citations only reads/writes the standard fields above
+                # and passes an unrecognized extra key straight through untouched.
             }
-            for ev, _ in candidates
+            for key, ev, _ in candidates
         ],
-        "content_items": [claim for _, claim in candidates],
+        "content_items": [claim for _, _, claim in candidates],
     }
     validate_citations(response_data, "evidence", fetched_data=fd)
 
     # Honor in-place mutations: drop any claim flagged __drop__ (generic,
     # correct handling — inert for query_type="evidence" today, see docstring).
-    after_refs_by_pmid = {r.get("pmid"): r for r in response_data["references"] if r.get("pmid")}
+    after_refs_by_key = {r["_key"]: r for r in response_data["references"]}
 
     kept: list[EvidenceItem] = []
-    for evidence_item, claim_dict in candidates:
+    for key, evidence_item, claim_dict in candidates:
         if claim_dict.get("__drop__"):
             continue
-        pmid = evidence_item.reference.pmid
-        updated_ref = after_refs_by_pmid.get(pmid)
+        updated_ref = after_refs_by_key.get(key)
         if updated_ref is None:
             continue  # validate_citations removed it (e.g. unverified/hallucinated pmid)
         if updated_ref.get("url") != evidence_item.reference.url:

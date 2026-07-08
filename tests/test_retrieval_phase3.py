@@ -26,12 +26,21 @@ successfully grounds end to end at least once — is:
 
 1. The flagship runs through the FULL graded pipeline without exception.
 2. For EACH ``GradedHypothesis``: if ``evidence`` is non-empty, every item
-   carries a real digit-string PMID + a resolvable
-   ``https://pubmed.ncbi.nlm.nih.gov/`` URL + a valid grade (this can NEVER
-   silently regress to off-topic/fabricated citations — guarded further by
-   the ``bears_on_hypothesis`` gate, agent 4, and directly here); if
-   ``evidence`` IS empty, ``grounded`` must be ``False`` (graceful demotion,
-   never a crash, never a phantom citation).
+   carries a RESOLVABLE reference + a valid grade (this can NEVER silently
+   regress to off-topic/fabricated citations — guarded further by the
+   ``bears_on_hypothesis`` gate, agent 4, and directly here). "Resolvable"
+   matches ``agents.run_grade``'s own resolution contract (Opus review, the
+   ``registry.lookup_id(pmid=, nct_id=, doi=, title=)`` fix) and the reused
+   grounding gate's own ``_is_grounded`` definition (pmid OR nct_id OR doi
+   OR url) — NOT pmid-only: ``reference.url`` must be a real
+   ``https://`` pubmed/clinicaltrials/doi URL, AND *if* ``reference.pmid``
+   is set, it must be a digit string. A ClinicalTrials.gov item legitimately
+   has ``reference.pmid is None`` with a ``clinicaltrials.gov`` URL — that
+   is not weaker than the old pmid-only bar, it is the CORRECT bar (the old
+   one silently excluded real, resolvable, often HIGH-grade trial evidence
+   from ever counting, which is what caused this fix in the first place);
+   if ``evidence`` IS empty, ``grounded`` must be ``False`` (graceful
+   demotion, never a crash, never a phantom citation).
 3. At least ONE hypothesis grounds (non-empty evidence AND ``grounded is
    True``) — proves the retrieval -> grading -> entailment -> grounding
    chain genuinely works end to end on live data, not just in isolated
@@ -69,6 +78,14 @@ pytestmark = pytest.mark.skipif(
 
 _PMID_RE = re.compile(r"^\d+$")
 _VALID_GRADES = set(EvidenceGrade.__args__)  # type: ignore[attr-defined]
+# The same 3 URL families article_registry.py's own URL builders ever
+# produce (pubmed_url/clinicaltrials_url/doi_url) -- matches the reused
+# grounding gate's "resolvable identifier" contract, not pmid-only.
+_RESOLVABLE_URL_PREFIXES = (
+    "https://pubmed.ncbi.nlm.nih.gov/",
+    "https://clinicaltrials.gov/",
+    "https://doi.org/",
+)
 
 
 def test_flagship_grounds_end_to_end_without_requiring_every_hypothesis_to() -> None:
@@ -87,11 +104,16 @@ def test_flagship_grounds_end_to_end_without_requiring_every_hypothesis_to() -> 
 
         if gh.evidence:
             for item in gh.evidence:
-                pmid = item.reference.pmid or ""
-                assert _PMID_RE.match(pmid), f"hypothesis {h.id}: non-digit pmid {pmid!r}"
-                assert item.reference.url and item.reference.url.startswith(
-                    "https://pubmed.ncbi.nlm.nih.gov/"
-                ), f"hypothesis {h.id}: unresolvable url {item.reference.url!r}"
+                # If a pmid IS set, it must be a real digit string (never
+                # fabricated/malformed) -- but it is NOT required to be set:
+                # a ClinicalTrials.gov-only item legitimately has pmid=None.
+                if item.reference.pmid is not None:
+                    assert _PMID_RE.match(item.reference.pmid), (
+                        f"hypothesis {h.id}: non-digit pmid {item.reference.pmid!r}"
+                    )
+                assert item.reference.url and item.reference.url.startswith(_RESOLVABLE_URL_PREFIXES), (
+                    f"hypothesis {h.id}: unresolvable url {item.reference.url!r}"
+                )
                 assert item.reference.source
                 assert item.claim_fragment.strip()
                 assert item.grade in _VALID_GRADES
