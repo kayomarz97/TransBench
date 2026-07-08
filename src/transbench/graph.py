@@ -1,13 +1,14 @@
-"""graph.py — LangGraph orchestration (BUILD_SPEC.md §5, KICKOFF.md Phase 2).
+"""graph.py — LangGraph orchestration (BUILD_SPEC.md §5, KICKOFF.md Phase 3).
 
-Phase 1 shipped a single-node stub. Phase 2 (this file, today) wires the
-first two REAL agents — Decomposer (Haiku) and Hypothesis Generator (Sonnet,
-BUILD_SPEC.md §5) — so the flagship observation now flows through real LLM
-calls and populates ``TransBrief.axes`` + ``hypotheses`` for real.
-Downstream stages (retrieve/grade/novelty/rigor/design/assemble — agents
-3-8) remain an accurate, clearly-labeled placeholder until Phases 3-5.
+Phase 1 shipped a single-node stub. Phase 2 wired agents 1-2 (Decomposer,
+Hypothesis Generator). Phase 3 (this file, today) wires agents 3-4 (Evidence
+Retriever — no LLM directly; Evidence Grader — Haiku, batched per
+hypothesis), fanned out across hypotheses with a concurrency cap, so
+``GradedHypothesis.evidence``/``supporting_count``/``contradicting_count``
+are now real, PMID-backed output. Agents 5-8 (novelty/rigor/design/assemble)
+remain an accurate, clearly-labeled placeholder until Phase 4-5.
 
-Phases 3-5 grow this into the full topology (BUILD_SPEC.md §5, last
+Phases 4-5 grow this into the full topology (BUILD_SPEC.md §5, last
 paragraph): ``START -> decompose -> hypothesize -> fan-out(retrieve -> grade
 -> novelty) -> rigor -> design -> assemble -> END``. The ``TransBenchState``
 TypedDict below is shaped as a superset target so later phases add
@@ -15,15 +16,17 @@ fields/nodes without reshaping what's already established.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
-from typing import Optional, TypedDict
+from typing import Any, Optional, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
 from transbench import agents, config
-from transbench.reuse import REUSE_SOURCE
+from transbench.reuse import REUSE_SOURCE, init_http_client, shutdown_http_client
 from transbench.schemas import (
     DecomposedAxis,
+    EvidenceItem,
     ExperimentPlan,
     GradedHypothesis,
     Hypothesis,
@@ -41,9 +44,9 @@ _DEFAULT_DATASET_POINTER = "https://tabula-sapiens-portal.ds.czbiohub.org/"
 
 class TransBenchState(TypedDict, total=False):
     """State threaded through the graph. Phases 1-2 populate/read
-    observation/focus_drug/.../axes/hypotheses; Phases 3-5 add retrieve/
-    grade/novelty/rigor/design outputs (evidence, references,
-    contradictions, ...) to this same dict rather than a parallel shape.
+    observation/focus_drug/.../axes/hypotheses; Phase 3 adds per-hypothesis
+    evidence + a retrieval snapshot; Phase 4-5 add novelty/rigor/design
+    outputs to this same dict rather than a parallel shape.
     """
 
     observation: str
@@ -56,6 +59,8 @@ class TransBenchState(TypedDict, total=False):
     retrieval_snapshot: Optional[dict]
     axes: list[DecomposedAxis]
     hypotheses: list[Hypothesis]
+    evidence_by_hyp_id: dict[str, list[EvidenceItem]]
+    retrieval_manifest_by_hyp_id: dict[str, dict]
     brief: TransBrief
 
 
@@ -95,64 +100,134 @@ async def _hypothesize_node(state: TransBenchState) -> TransBenchState:
     return {**state, "hypotheses": hypotheses}
 
 
+async def _retrieve_and_grade_node(state: TransBenchState) -> TransBenchState:
+    """Agents 3 (Evidence Retriever, no LLM) + 4 (Evidence Grader, Haiku,
+    batched per hypothesis) — BUILD_SPEC.md §3/§5. Fanned out across
+    hypotheses with ``asyncio.gather`` under a concurrency cap of
+    ``config.CONCURRENCY`` (mirrors Iatronix's own
+    ``parallel_sections_max_concurrent`` — BUILD_SPEC.md §3).
+
+    A hypothesis with genuinely zero retrievable/gradable evidence gets an
+    empty list, not a crash (``run_retrieve``/``run_grade`` already handle
+    that gracefully) — this node does not add extra error handling on top.
+    """
+    hypotheses = state.get("hypotheses", [])
+    user_key = state.get("user_key")
+    user_provider = state.get("user_provider", "anthropic")
+    model_cheap = state.get("model_cheap", config.MODEL_CHEAP)
+
+    semaphore = asyncio.Semaphore(config.CONCURRENCY)
+
+    async def _one(hypothesis: Hypothesis) -> tuple[str, list[EvidenceItem], dict]:
+        async with semaphore:
+            retrieval = await agents.run_retrieve(
+                hypothesis, user_key, user_provider=user_provider, model_id=model_cheap
+            )
+            evidence = await agents.run_grade(
+                hypothesis,
+                retrieval.ranked,
+                retrieval.registry,
+                retrieval.fd,
+                user_key,
+                user_provider=user_provider,
+                model_id=model_cheap,
+            )
+        # Retrieval snapshot for run_manifest (BUILD_SPEC.md §3/§9): the
+        # neutral query + the RANKED/CAPPED abstracts actually used (not the
+        # full uncapped raw_abstracts, to keep the manifest a reasonable
+        # size — a scope-appropriate adaptation, documented here and in the
+        # phase report).
+        manifest_entry = {
+            "neutral_query": retrieval.neutral_query,
+            "pubmed_query": retrieval.pubmed_query,
+            "abstracts": [
+                {"pmid": a.get("pmid"), "title": a.get("title"), "year": a.get("year")}
+                for a in retrieval.ranked
+            ],
+        }
+        return hypothesis.id, evidence, manifest_entry
+
+    results = await asyncio.gather(*[_one(h) for h in hypotheses])
+
+    evidence_by_hyp_id = {hyp_id: evidence for hyp_id, evidence, _ in results}
+    retrieval_manifest_by_hyp_id = {hyp_id: manifest for hyp_id, _, manifest in results}
+    return {
+        **state,
+        "evidence_by_hyp_id": evidence_by_hyp_id,
+        "retrieval_manifest_by_hyp_id": retrieval_manifest_by_hyp_id,
+    }
+
+
 def _assemble_placeholder_node(state: TransBenchState) -> TransBenchState:
-    """Assembles the ``TransBrief`` from REAL axes (agent 1) and REAL
-    hypotheses (agent 2). Evidence/grading/novelty/rigor/experiment/assembly
-    (agents 3-8) are not wired yet (Phases 3-5) — each hypothesis is wrapped
-    in a placeholder ``GradedHypothesis`` that HONESTLY reflects that: empty
-    evidence, ``novelty="unsupported"`` (schema-valid; ``novelty_reason``
+    """Assembles the ``TransBrief`` from REAL axes (agent 1), REAL hypotheses
+    (agent 2), and REAL graded evidence (agents 3-4). Novelty/rigor/
+    experiment/assembly (agents 5-8) are not wired yet (Phase 4-5) — each
+    hypothesis is wrapped in a placeholder ``GradedHypothesis`` for THOSE
+    fields only: ``novelty="unsupported"`` (schema-valid; ``novelty_reason``
     explains why), ``grounded=False`` (correctly means the Phase 4 rigor gate
-    would exclude these from experiment design if that stage ran). No LLM
-    calls happen in this function itself — it only assembles prior nodes'
-    real output into the final schema.
+    would exclude these from experiment design if that stage ran).
+    ``evidence``/``supporting_count``/``contradicting_count`` ARE real. No
+    LLM calls happen in this function itself — it only assembles prior
+    nodes' real output into the final schema.
     """
     observation = state["observation"]
     focus_drug = state.get("focus_drug")
     axes = state.get("axes", [])
     hypotheses = state.get("hypotheses", [])
+    evidence_by_hyp_id: dict[str, list[EvidenceItem]] = state.get("evidence_by_hyp_id", {})
+    retrieval_manifest_by_hyp_id: dict[str, dict] = state.get("retrieval_manifest_by_hyp_id", {})
 
-    graded_hypotheses = [
-        GradedHypothesis(
-            hypothesis=h,
-            evidence=[],
-            supporting_count=0,
-            contradicting_count=0,
-            novelty="unsupported",
-            novelty_reason=(
-                "Phase 2: no evidence retrieval/grading has run yet for this "
-                "hypothesis (BUILD_SPEC.md §5 agents 3-6 — Evidence Retriever, "
-                "Grader, Novelty Checker, Rigor Gate — land in Phases 3-4). "
-                "This verdict is a placeholder, not a real novelty assessment."
-            ),
-            confidence="low",
-            grounded=False,
+    graded_hypotheses = []
+    for h in hypotheses:
+        evidence = evidence_by_hyp_id.get(h.id, [])
+        supporting_count = sum(1 for e in evidence if e.supports)
+        contradicting_count = sum(1 for e in evidence if not e.supports)
+        graded_hypotheses.append(
+            GradedHypothesis(
+                hypothesis=h,
+                evidence=evidence,
+                supporting_count=supporting_count,
+                contradicting_count=contradicting_count,
+                novelty="unsupported",
+                novelty_reason=(
+                    "Phase 3: evidence has been retrieved and graded for this "
+                    f"hypothesis ({len(evidence)} PMID-backed item(s), "
+                    f"{supporting_count} supporting / {contradicting_count} "
+                    "contradicting). Novelty classification and the rigor/"
+                    "grounding gate (BUILD_SPEC.md §5 agents 5-6) have not run "
+                    "yet (Phase 4) — this verdict is still a placeholder, not "
+                    "a real novelty assessment."
+                ),
+                confidence="low",
+                grounded=False,
+            )
         )
-        for h in hypotheses
-    ]
 
     top_experiment = ExperimentPlan(
         hypothesis_id=hypotheses[0].id if hypotheses else "stub-0",
-        question="Phase 2 placeholder — no experiment designer wired yet.",
+        question="Phase 3 placeholder — no experiment designer wired yet.",
         dataset=_DEFAULT_DATASET,
         dataset_pointer=_DEFAULT_DATASET_POINTER,
         method="Not yet designed (BUILD_SPEC.md §5 agent 7 / Experiment Designer lands in Phase 5).",
-        protocol_steps=["Phase 2 placeholder — no real protocol has been designed yet."],
+        protocol_steps=["Phase 3 placeholder — no real protocol has been designed yet."],
         confirm_if="N/A — not yet designed.",
         refute_if="N/A — not yet designed.",
         feasibility_notes="Placeholder TransBrief: no real experiment design has run yet.",
         claude_science_prompt="N/A — not yet designed.",
     )
 
-    run_manifest = {
-        "phase": "2-agents-1-2",
+    run_manifest: dict[str, Any] = {
+        "phase": "3-retrieval-grading",
         "reuse_source": REUSE_SOURCE,
         "model_reasoning": state.get("model_reasoning", config.MODEL_REASONING),
         "model_cheap": state.get("model_cheap", config.MODEL_CHEAP),
         "temperature": config.TEMPERATURE,
         "max_hypotheses": state.get("max_hypotheses", config.MAX_HYPOTHESES),
         "abstract_cap": config.ABSTRACT_CAP,
+        "concurrency": config.CONCURRENCY,
         "focus_drug": focus_drug,
         "retrieval_snapshot_provided": state.get("retrieval_snapshot") is not None,
+        "retrieval_snapshot": retrieval_manifest_by_hyp_id,
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
     }
 
@@ -164,12 +239,13 @@ def _assemble_placeholder_node(state: TransBenchState) -> TransBenchState:
         references=[],
         contradictions_surfaced=[],
         uncertainty_note=(
-            "Phase 2: decomposition (agent 1) and hypothesis generation "
-            "(agent 2) are real LLM output. Evidence retrieval, grading, "
-            "novelty classification, the rigor gate, experiment design, and "
-            "final brief assembly (agents 3-8) have not run yet — those land "
-            "in Phases 3-5. Treat every hypothesis below as ungrounded until "
-            "then."
+            "Phase 3: decomposition (agent 1), hypothesis generation (agent "
+            "2), evidence retrieval (agent 3), and evidence grading (agent 4) "
+            "are real output — every EvidenceItem below carries a real, "
+            "resolvable PMID reference. Novelty classification, the rigor/"
+            "grounding gate, experiment design, and final brief assembly "
+            "(agents 5-8) have not run yet — those land in Phase 4-5. Treat "
+            "every hypothesis below as ungrounded/unverified until then."
         ),
         run_manifest=run_manifest,
     )
@@ -178,17 +254,21 @@ def _assemble_placeholder_node(state: TransBenchState) -> TransBenchState:
 
 def build_graph():
     """Compile the ``StateGraph``: ``START -> decompose -> hypothesize ->
-    assemble_placeholder -> END``. Pure graph construction — no LLM client is
-    built at compile time (clients are built per-call inside the async
-    decompose/hypothesize nodes, using that call's own ``user_key``), so this
-    is cheap and safe to call more than once."""
+    retrieve_and_grade -> assemble_placeholder -> END``. Pure graph
+    construction — no LLM client or HTTP client is built at compile time
+    (clients are built per-call inside the async nodes, using that call's own
+    ``user_key``; the shared HTTP client is managed once per run by
+    :func:`run_transbench_graph`), so this is cheap and safe to call more
+    than once."""
     graph = StateGraph(TransBenchState)
     graph.add_node("decompose", _decompose_node)
     graph.add_node("hypothesize", _hypothesize_node)
+    graph.add_node("retrieve_and_grade", _retrieve_and_grade_node)
     graph.add_node("assemble_placeholder", _assemble_placeholder_node)
     graph.add_edge(START, "decompose")
     graph.add_edge("decompose", "hypothesize")
-    graph.add_edge("hypothesize", "assemble_placeholder")
+    graph.add_edge("hypothesize", "retrieve_and_grade")
+    graph.add_edge("retrieve_and_grade", "assemble_placeholder")
     graph.add_edge("assemble_placeholder", END)
     return graph.compile()
 
@@ -210,14 +290,21 @@ async def run_transbench_graph(
 ) -> TransBrief:
     """Run the compiled graph and return the resulting ``TransBrief``.
 
-    Phase 2: decompose + hypothesize make REAL Anthropic calls via
-    ``agents.build_llm(...).bind(temperature=0)`` + ``await llm.ainvoke(...)``
-    (BUILD_SPEC.md §5/§0.7). ``user_key`` MUST be a usable BYOK key for this
-    to succeed — ``engine.run_transbench`` falls back to
-    ``config.ANTHROPIC_API_KEY`` (the process env) when the caller doesn't
-    pass one explicitly (BUILD_SPEC.md §0.4). A missing/invalid key surfaces
-    as :class:`transbench.agents.TransBenchLLMError`, not a raw
+    Phase 3: decompose + hypothesize + (per-hypothesis) retrieve + grade all
+    make REAL calls — Anthropic (``agents.build_llm(...).bind(temperature=0)``
+    + ``await llm.ainvoke(...)``, BUILD_SPEC.md §5/§0.7) and PubMed (via
+    ``fetch_evidence_data``, HTTP-only, DB-free). ``user_key`` MUST be a
+    usable BYOK key for the Anthropic calls to succeed —
+    ``engine.run_transbench`` falls back to ``config.ANTHROPIC_API_KEY`` (the
+    process env) when the caller doesn't pass one explicitly (BUILD_SPEC.md
+    §0.4). A missing/invalid key surfaces as
+    :class:`transbench.agents.TransBenchLLMError`, not a raw
     ``fastapi.HTTPException``.
+
+    Manages the shared HTTP client lifecycle exactly once per run
+    (BUILD_SPEC.md §3): ``init_http_client()`` before the graph runs,
+    ``shutdown_http_client()`` in a ``finally`` block after — so it is closed
+    even if an agent raises (e.g. a bad BYOK key).
     """
     initial_state: TransBenchState = {
         "observation": observation,
@@ -229,5 +316,9 @@ async def run_transbench_graph(
         "model_cheap": model_cheap,
         "retrieval_snapshot": retrieval_snapshot,
     }
-    final_state = await _COMPILED_GRAPH.ainvoke(initial_state)
+    await init_http_client()
+    try:
+        final_state = await _COMPILED_GRAPH.ainvoke(initial_state)
+    finally:
+        await shutdown_http_client()
     return final_state["brief"]

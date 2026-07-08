@@ -52,10 +52,15 @@ def test_flagship_decompose_and_hypothesize_real_llm_calls() -> None:
         assert h.prediction.strip(), f"hypothesis {h.id} has an empty (non-falsifiable) prediction"
         assert h.axis in _VALID_AXES, f"hypothesis {h.id} has an invalid axis {h.axis!r}"
 
-    # --- Downstream stages must still be honestly labeled as not-yet-run (Phase 3+) ---
+    # --- Downstream rigor/novelty stages must still be honestly labeled as
+    # not-yet-run (Phase 4+). Note: as of Phase 3, `evidence` IS legitimately
+    # populated (retrieve+grade now run in this same pipeline) -- this test
+    # only gates agents 1-2's own contract, so it no longer asserts
+    # `evidence == []` (that was Phase 2's placeholder-era expectation, not a
+    # real invariant of decompose/hypothesize). See test_retrieval_phase3.py
+    # for the agent 3-4 evidence assertions.
     for gh in brief.hypotheses:
         assert gh.grounded is False
-        assert gh.evidence == []
 
     # Printed (not asserted) so a human can eyeball scientific sanity, per the
     # coordinator's request — visible with `pytest -q -s`.
