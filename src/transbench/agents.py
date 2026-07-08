@@ -1,22 +1,38 @@
 """agents.py — the 8 agents (BUILD_SPEC.md §5). Phase 2 implemented agents 1-2
-(Decomposer, Hypothesis Generator). Phase 3 (this file, today) adds agents 3-4
-(Evidence Retriever — no LLM; Evidence Grader — Haiku, batched). Agents 5-8
-land in Phase 4-5.
+(Decomposer, Hypothesis Generator). Phase 3 added agents 3-4 (Evidence
+Retriever — no LLM; Evidence Grader — Haiku, batched). Phase 4 added agents
+5-6 (Novelty Checker, Rigor Gate — in ``rigor.py``, which reuses this
+module's ``build_llm``/``_ainvoke_json``/``_coerce_list``/
+``_normalize_enum_field`` helpers). Phase 5 (this file, today) adds agents
+7-8 (Experiment Designer, Brief Assembler) and two supporting pieces
+BUILD_SPEC.md §9 requires: per-run token-spend accounting
+(:func:`token_spend_session` / :func:`current_token_spend`) and retrieval
+-snapshot REPLAY (:func:`run_retrieve`'s ``retrieval_snapshot`` kwarg).
 
 Agents 1-2 follow the shape ``async run_<name>(payload: dict, llm) -> ...``
 (BUILD_SPEC.md §5), taking a PRE-BUILT, temperature-0-bound client. Agents 3-4
 have genuinely different contracts per BUILD_SPEC.md §3/§5 (retrieval has no
 LLM at all; grading builds its own client from ``user_key`` since it needs
 the registry/ranked-articles output of retrieval first) — see
-:func:`run_retrieve` / :func:`run_grade` docstrings.
+:func:`run_retrieve` / :func:`run_grade` docstrings. Agent 7
+(:func:`run_design_experiment`) takes a hypothesis + its evidence + a
+PRE-BUILT client (agents 1-2's convention). Agent 8 (:func:`run_assemble`)
+takes the full pipeline ``state`` dict (``graph.py``'s ``TransBenchState`` is
+a plain dict at runtime and satisfies this directly) + a PRE-BUILT client,
+since assembly needs many upstream pieces (axes, graded hypotheses, per
+-hypothesis registries, the experiment plan, retrieval manifest) at once.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
+import datetime as _dt
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, get_args
+from urllib.parse import urlsplit
 
 import json_repair
 from fastapi import HTTPException
@@ -25,11 +41,14 @@ from pydantic import ValidationError
 
 from transbench import config
 from transbench.prompts import (
+    BRIEF_ASSEMBLER_SYSTEM_PROMPT,
     DECOMPOSER_SYSTEM_PROMPT,
     EVIDENCE_GRADER_SYSTEM_PROMPT,
+    EXPERIMENT_DESIGNER_SYSTEM_PROMPT,
     HYPOTHESIS_GENERATOR_SYSTEM_PROMPT,
 )
 from transbench.reuse import (
+    REUSE_SOURCE,
     EvidenceFetchResult,
     EvidenceFloorError,
     FetchedData,
@@ -47,9 +66,12 @@ from transbench.schemas import (
     DecomposedAxis,
     EvidenceGrade,
     EvidenceItem,
+    ExperimentPlan,
+    GradedHypothesis,
     Hypothesis,
     Priority,
     Reference,
+    TransBrief,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,10 +80,14 @@ __all__ = [
     "TransBenchLLMError",
     "RetrievalResult",
     "build_llm",
+    "token_spend_session",
+    "current_token_spend",
     "run_decompose",
     "run_hypothesize",
     "run_retrieve",
     "run_grade",
+    "run_design_experiment",
+    "run_assemble",
 ]
 
 
@@ -191,6 +217,31 @@ def _coerce_list(parsed: Any, preferred_key: str) -> list:
     )
 
 
+def _coerce_dict(parsed: Any, preferred_key: Optional[str] = None) -> dict:
+    """Defensive shape handling for a single-JSON-OBJECT response (the
+    ``_coerce_list`` sibling for agents whose STRICT-JSON contract is one
+    object, not a list — agent 7's ``ExperimentPlan`` and agent 8's
+    ``{"uncertainty_note": ...}``). Accepts, in order: a dict with
+    ``parsed[preferred_key]`` itself a dict (a model that wrapped its object
+    under a named key despite the prompt asking for the bare object); a bare
+    dict; or (defensive — mirrors ``rigor.run_novelty``'s handling of the
+    same real, observed LLM habit) a list containing at least one dict,
+    using the first one. Returns ``{}`` — never raises — if nothing dict
+    -shaped is found; callers are responsible for treating a still-missing
+    required field as their own error (this function only unwraps shape, it
+    never validates content).
+    """
+    if isinstance(parsed, dict):
+        if preferred_key and isinstance(parsed.get(preferred_key), dict):
+            return dict(parsed[preferred_key])
+        return dict(parsed)
+    if isinstance(parsed, list):
+        for entry in parsed:
+            if isinstance(entry, dict):
+                return dict(entry)
+    return {}
+
+
 # Valid values derived directly from the schema's own Literal definitions —
 # single source of truth, never a duplicated string list that could drift.
 _AXIS_VALUES = frozenset(get_args(Axis))
@@ -247,7 +298,85 @@ async def _ainvoke_json(llm, system_prompt: str, user_content: str) -> Any:
     response = await llm.ainvoke(
         [SystemMessage(content=system_prompt), HumanMessage(content=user_content)]
     )
+    _record_token_usage(response)
     return _parse_json(_response_text(response))
+
+
+# ---------------------------------------------------------------------------
+# Token-spend accounting (BUILD_SPEC.md §9: "run_manifest records ... token
+# spend per run"). A ``contextvars.ContextVar`` rather than a plain module
+# global — this repo's own MCP server (Phase 6) may serve multiple concurrent
+# ``run_transbench`` calls in one process, and a plain global dict would mix
+# unrelated runs' token counts together. Each call to
+# :func:`token_spend_session` installs a FRESH accumulator dict; every
+# ``asyncio.Task`` spawned from within that `with` block (including ones
+# fanned out via ``asyncio.gather`` in graph.py's per-hypothesis nodes) gets
+# its own copy of the *context*, but that copy still references the exact
+# SAME mutable dict object — so mutations from any fanned-out task are
+# visible to every other task and to the code that reads the total back
+# after the ``with`` block's body completes. This is race-free under asyncio
+# specifically because asyncio is single-threaded/cooperative: a dict
+# increment between two ``await`` points can never be interleaved with
+# another coroutine's.
+# ---------------------------------------------------------------------------
+
+_TOKEN_SPEND: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar("_TOKEN_SPEND", default=None)
+
+_EMPTY_TOKEN_SPEND: dict = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+
+def _record_token_usage(response: Any) -> None:
+    """Best-effort token accounting: reads LangChain's ``usage_metadata`` off
+    the raw ``AIMessage`` (confirmed populated by langchain-anthropic for
+    every real Anthropic response — ``input_tokens``/``output_tokens``/
+    ``total_tokens``) and accumulates it into whatever mutable dict the
+    current run installed via :func:`token_spend_session`. A deliberate
+    no-op — never raises, never logs — when no session is active (e.g. a
+    standalone agents.py call/unit test outside ``run_transbench_graph``) or
+    the response is a fake-LLM-double with no such attribute (the existing
+    Phase 3/4 fake-LLM tests construct a bare object with only ``.content``)
+    — token accounting must never be able to break a real pipeline run or an
+    existing offline test.
+    """
+    sink = _TOKEN_SPEND.get()
+    if sink is None:
+        return
+    usage = getattr(response, "usage_metadata", None) or {}
+    sink["calls"] = sink.get("calls", 0) + 1
+    sink["input_tokens"] = sink.get("input_tokens", 0) + int(usage.get("input_tokens", 0) or 0)
+    sink["output_tokens"] = sink.get("output_tokens", 0) + int(usage.get("output_tokens", 0) or 0)
+    sink["total_tokens"] = sink.get("total_tokens", 0) + int(
+        usage.get("total_tokens", 0) or (usage.get("input_tokens", 0) or 0) + (usage.get("output_tokens", 0) or 0)
+    )
+
+
+@contextlib.contextmanager
+def token_spend_session():
+    """Install a fresh token-spend accumulator for the duration of ONE engine
+    run (BUILD_SPEC.md §9). ``graph.py``'s ``run_transbench_graph`` wraps the
+    whole graph invocation in this context manager; :func:`current_token_spend`
+    (called by :func:`run_assemble` while building ``run_manifest``, i.e.
+    still inside this same ``with`` block since assemble is the graph's last
+    node) reads back the running total, which by then includes every real
+    LLM call the run made (decompose, hypothesize, each hypothesis's grade +
+    entailment + novelty, design, and assemble's own ``uncertainty_note``
+    call) — because that call itself runs before ``current_token_spend()`` is
+    invoked below.
+    """
+    token = _TOKEN_SPEND.set({"calls": 0, "input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+    try:
+        yield
+    finally:
+        _TOKEN_SPEND.reset(token)
+
+
+def current_token_spend() -> dict:
+    """Read the current run's accumulated token spend (BUILD_SPEC.md §9). A
+    fixed all-zero dict if no :func:`token_spend_session` is active (e.g. an
+    agent called directly in a unit test, outside ``run_transbench_graph``)
+    — never ``None``, so a caller can always safely read its keys."""
+    sink = _TOKEN_SPEND.get()
+    return dict(sink) if sink is not None else dict(_EMPTY_TOKEN_SPEND)
 
 
 # ---------------------------------------------------------------------------
@@ -673,6 +802,59 @@ def _entity_pubmed_query(
     return " ".join(terms)
 
 
+def _replay_from_snapshot(hypothesis_id: str, snapshot_entry: dict) -> RetrievalResult:
+    """Snapshot REPLAY (BUILD_SPEC.md §9): a pure, fully OFFLINE, zero
+    -network reconstruction of a prior :func:`run_retrieve` call's
+    ``RetrievalResult`` from a previously-captured
+    ``run_manifest["retrieval_snapshot"][hypothesis_id]`` entry (shape:
+    ``{"neutral_query": str, "pubmed_query": str, "abstracts": list[dict]}``
+    — exactly what ``graph.py``'s ``_retrieve_and_grade_node`` writes there
+    on a live run). Never calls ``neutralize_query`` or
+    ``fetch_evidence_data``.
+
+    Rebuilds a REAL, fully-functional ``ArticleRegistry`` from the
+    snapshot's own raw abstract dicts via the SAME reused
+    ``build_article_registry`` leaf a live fetch uses (wrapped in
+    ``EvidenceFetchResult``/``FetchedData`` exactly per BUILD_SPEC.md §2's
+    contract) — both pure, in-process, no I/O — so downstream
+    ``run_grade``'s ``registry.lookup_id(...)`` resolves precisely as it
+    would have the first time. All snapshot abstracts are placed in the
+    ``clinical_trial_abstracts`` bucket; which of the 3 buckets they land in
+    is immaterial to registry construction (``build_article_registry``
+    unions all 3 and infers ``source_type`` per-item from ``nct_id``
+    presence, not from which list it came from — confirmed by reading
+    ``article_registry.py``'s ``_walk_abstracts``).
+
+    The snapshot's own stored abstract ORDER is preserved verbatim as
+    ``ranked`` (not re-run through ``rank_article_list``) — it already IS
+    the exact ranked+capped output of the original live run, and
+    re-ranking a pure function against unchanged input would only
+    reproduce the same order at the cost of needing to also snapshot
+    ``entities``/``query_text`` for no benefit.
+    """
+    neutral_query = str(snapshot_entry.get("neutral_query") or "")
+    pubmed_query = str(snapshot_entry.get("pubmed_query") or "")
+    abstracts = [a for a in (snapshot_entry.get("abstracts") or []) if isinstance(a, dict)]
+
+    merged = EvidenceFetchResult(
+        clinical_trial_abstracts=abstracts,
+        systematic_review_abstracts=[],
+        guideline_abstracts=[],
+        fetch_success=bool(abstracts),
+    )
+    fd = FetchedData(query_type="evidence", evidence_data=merged)
+    registry = build_article_registry(fd)
+
+    logger.info(
+        "run_retrieve: REPLAYED hypothesis %s from retrieval_snapshot (%d abstracts, zero network calls)",
+        hypothesis_id,
+        len(abstracts),
+    )
+    return RetrievalResult(
+        neutral_query=neutral_query, pubmed_query=pubmed_query, ranked=abstracts, registry=registry, fd=fd
+    )
+
+
 async def run_retrieve(
     hypothesis: Hypothesis,
     user_key: Optional[str],
@@ -680,6 +862,7 @@ async def run_retrieve(
     user_provider: str = "anthropic",
     model_id: Optional[str] = None,
     observation: str = "",
+    retrieval_snapshot: Optional[dict] = None,
 ) -> RetrievalResult:
     """Agent 3 — Evidence Retriever (BUILD_SPEC.md §3; no LLM call is made
     directly by this function — ``neutralize_query`` makes its own internal,
@@ -695,6 +878,17 @@ async def run_retrieve(
     anchor. Defaults to ``""`` (safely resolves to "hypertension" via
     ``_condition_anchor``'s own fallback) for standalone/test callers that
     don't have an observation handy.
+
+    ``retrieval_snapshot`` (BUILD_SPEC.md §9, Phase 5): when provided AND it
+    contains an entry keyed by ``hypothesis.id``, this function REPLAYS that
+    entry via :func:`_replay_from_snapshot` instead of calling
+    ``neutralize_query``/``fetch_evidence_data`` at all — a fully
+    deterministic, zero-network reconstruction (see that function's
+    docstring). When ``retrieval_snapshot`` is ``None``, empty, or simply
+    has no entry for THIS hypothesis's id, this falls through to live
+    retrieval exactly as before — a graceful, silent fallback (a snapshot
+    captured on a prior run legitimately may not cover a freshly-generated
+    hypothesis id on a later run; that is not an error).
 
     Implements the corrected §3 flow, with one empirically-forced query-
     construction fix (see below):
@@ -765,6 +959,10 @@ async def run_retrieve(
     hypothesis (e.g. about a very sparse/novel gene combination) is a valid,
     expected outcome (handled gracefully downstream), not a bug.
     """
+    snapshot_entry = (retrieval_snapshot or {}).get(hypothesis.id)
+    if snapshot_entry is not None:
+        return _replay_from_snapshot(hypothesis.id, snapshot_entry)
+
     stance = await neutralize_query(
         hypothesis.statement, model_id or config.MODEL_CHEAP, user_key, user_provider
     )
@@ -1046,6 +1244,532 @@ async def run_grade(
             evidence_item = evidence_item.model_copy(
                 update={"reference": evidence_item.reference.model_copy(update={"url": updated_ref.get("url")})}
             )
+        # Mark the backing registry entry as actually-cited (Phase 5,
+        # BUILD_SPEC.md §5 agent 8: "references via registry.to_reference_
+        # list()") -- that method's own contract sorts cited entries first
+        # via each RegistryArticle's `used_inline` flag, which is otherwise
+        # never set anywhere in this codebase (this repo never calls
+        # Iatronix's prompt-assembly path that normally sets it). Using
+        # `resolvable[key][1]` (the exact RegistryArticle this evidence item
+        # was resolved from, agent 4's own match) rather than re-deriving it
+        # keeps this a single, correct source of truth for "was this article
+        # actually used as evidence in the final brief".
+        registry.mark_used(resolvable[key][1])
         kept.append(evidence_item)
 
     return kept
+
+
+# ---------------------------------------------------------------------------
+# Agent 7 — Experiment Designer (Sonnet, config.MODEL_REASONING)
+# ---------------------------------------------------------------------------
+
+# BUILD_SPEC.md §5's "Grounding rule for datasets" names the recognized hosts
+# a `dataset_pointer` may resolve to (CELLxGENE / Tabula Sapiens, NCBI GEO,
+# ArrayExpress) plus allows a bare DOI ("its URL/DOI"). Hostname-suffix
+# match (exact or subdomain), https-only. Deliberately does NOT make a live
+# network request to confirm the id truly resolves -- that would add real
+# network flakiness/latency/cost to every experiment-design call (this repo
+# runs live PubMed calls already; adding a second live dependency here for a
+# structural check is the wrong trade). The guarantee this function provides
+# is "well-formed and points at a real, recognized public dataset host";
+# never-fabricate is additionally enforced by the FALLBACK behavior below
+# (see :func:`run_design_experiment`), not by this function alone.
+_RECOGNIZED_DATASET_HOSTS = (
+    "cellxgene.cziscience.com",
+    "tabula-sapiens-portal.ds.czbiohub.org",
+    "ncbi.nlm.nih.gov",  # NCBI GEO, e.g. www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE...
+    "ebi.ac.uk",  # ArrayExpress / BioStudies, e.g. www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-...
+    "doi.org",  # DOI resolver -- BUILD_SPEC.md §5: "dataset_pointer is its URL/DOI"
+)
+
+
+def _is_recognized_dataset_pointer(url: Any) -> bool:
+    """True iff ``url`` is a well-formed ``https`` URL whose hostname is (or
+    is a subdomain of) one of :data:`_RECOGNIZED_DATASET_HOSTS`. Never
+    raises on malformed/non-string input — returns ``False``."""
+    if not isinstance(url, str) or not url.strip():
+        return False
+    try:
+        parsed = urlsplit(url.strip())
+    except ValueError:
+        return False
+    if parsed.scheme != "https" or not parsed.netloc:
+        return False
+    host = (parsed.hostname or "").lower()
+    return any(host == h or host.endswith(f".{h}") for h in _RECOGNIZED_DATASET_HOSTS)
+
+
+_FALLBACK_FEASIBILITY_NOTE = (
+    "Fell back to the pinned default substrate (Tabula Sapiens immune "
+    "compartment) because the proposed dataset was empty or its pointer was "
+    "not a well-formed https URL to a recognized public dataset host "
+    "(BUILD_SPEC.md §5: never emit a fabricated/guessed accession)."
+)
+
+# BUILD_SPEC.md §5's own VERBATIM Experiment Designer prompt text (frozen,
+# reproduced character-for-character in EXPERIMENT_DESIGNER_SYSTEM_PROMPT)
+# names "method"/"protocol_steps"/"confirm_if"/"refute_if"/
+# "feasibility_notes"/"claude_science_prompt" explicitly in its own prose,
+# but never spells out "question" (or "hypothesis_id") as a literal JSON key
+# the way agents 1/4/6's prompts enumerate every field in a trailing "STRICT
+# JSON {...}" clause -- it only says "STRICT JSON = ExperimentPlan." Observed
+# live (real Sonnet call, flagship run): the model produced an otherwise
+# excellent, fully-grounded, real-GEO-accession response but used "title"
+# instead of "question" for the one field the prompt never names -- a
+# reasonable synonym, not a malformed response. Per this codebase's
+# established philosophy (`_normalize_enum_field` for casing, `_coerce_bool`
+# for string-vs-bool, `bears_on_hypothesis` structural enforcement): handle
+# a realistic LLM habit structurally in code rather than editing the frozen,
+# spec-verbatim prompt text. Tried in priority order; first non-empty wins.
+_QUESTION_FALLBACK_KEYS = ("question", "research_question", "study_question", "title", "experiment_title")
+
+
+def _first_present_str(item: dict, keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = str(item.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+async def run_design_experiment(candidate: Hypothesis, evidence: list[EvidenceItem], llm) -> ExperimentPlan:
+    """Agent 7 — Experiment Designer (BUILD_SPEC.md §5, §8;
+    ``EXPERIMENT_DESIGNER_SYSTEM_PROMPT``). ONE Sonnet call designing a
+    single computational experiment to confirm/refute ``candidate`` — the
+    hypothesis :func:`transbench.rigor.select_experiment_candidate` already
+    picked (already ``open_question`` AND ``grounded``; this function is only
+    ever invoked by the caller for an ELIGIBLE candidate — BUILD_SPEC.md §5
+    agent 7: "for the top open_question+grounded hypothesis" — it does not
+    re-check eligibility itself).
+
+    Only ``entailment=="supports"`` items from ``evidence`` are shown to the
+    model — the grounded evidence that actually motivated this candidate's
+    eligibility (contradicting/unclear items are legitimate context for
+    grading/novelty, but showing them here would invite the model to hedge
+    or design around evidence that isn't what grounded this hypothesis).
+
+    Framing (BUILD_SPEC.md §0.5 / this task): the prompt already forbids
+    clinical claims/wet-lab-only designs; this function adds no patient
+    -directed language of its own — ``question``/``confirm_if``/
+    ``refute_if`` are always about the EXPERIMENTAL criterion (does the data
+    confirm or refute the mechanistic claim), never a recommendation to
+    treat, prescribe, or act on any specific patient.
+
+    Grounding rule for datasets (BUILD_SPEC.md §5/§8), enforced in CODE, not
+    only requested in the prompt: if the model's own ``dataset`` is empty,
+    or ``dataset_pointer`` is not a well-formed ``https`` URL to a
+    recognized public dataset host (:func:`_is_recognized_dataset_pointer`),
+    this function OVERRIDES both fields with the pinned default substrate
+    (``config.DEFAULT_DATASET`` / ``config.DEFAULT_DATASET_POINTER`` — a
+    real, versioned, publicly downloadable human single-cell atlas,
+    guaranteed to resolve) and appends :data:`_FALLBACK_FEASIBILITY_NOTE` to
+    ``feasibility_notes`` — exactly BUILD_SPEC.md's "never fabricate/guess
+    an accession ... fall back ... and say so in feasibility_notes" rule,
+    guaranteed structurally rather than left to the model's own judgment
+    alone. This can NEVER produce an unresolvable ``dataset_pointer``:
+    either the model's own is recognized-host-shaped, or the
+    guaranteed-resolvable pinned default is substituted.
+
+    ``ExperimentPlan`` (BUILD_SPEC.md §4, frozen) has no ``Literal``/enum
+    -valued field, so ``_normalize_enum_field`` has nothing to normalize for
+    this agent's output (checked against the schema directly — this is a
+    deliberate no-op, not an oversight).
+
+    ``hypothesis_id`` in the returned ``ExperimentPlan`` is ALWAYS
+    ``candidate.id`` — never trusted from the model's own JSON echo (the
+    same "never trust an id round-tripped through free-form generation"
+    discipline ``run_grade``/``rigor.run_entailment`` already apply to
+    citation ids).
+
+    Raises :class:`TransBenchLLMError` if the response is missing any other
+    required field (``question``/``method``/``protocol_steps``/
+    ``confirm_if``/``refute_if``/``claude_science_prompt``) even after the
+    dataset fallback AND the ``question``/:data:`_QUESTION_FALLBACK_KEYS`
+    synonym fallback are both applied — unlike ``run_assemble``'s cosmetic
+    ``uncertainty_note``, a genuinely broken experiment design must surface
+    loudly (this is the tool's "money moment" output, BUILD_SPEC.md §8), not
+    be silently patched over.
+    """
+    lines = [
+        f"Hypothesis id: {candidate.id}",
+        f"Axis: {candidate.axis}",
+        f"Statement: {candidate.statement}",
+        f"Prediction: {candidate.prediction}",
+        f"Rationale: {candidate.rationale}",
+    ]
+    supporting = [ev for ev in evidence if ev.entailment == "supports"]
+    if supporting:
+        lines.append("Grounded supporting evidence (the basis for this hypothesis's eligibility):")
+        for ev in supporting:
+            cite = ev.reference.pmid or ev.reference.url or "unresolved"
+            lines.append(f"- id={cite} grade={ev.grade}: {ev.claim_fragment}")
+    else:
+        lines.append("No supporting evidence items were provided (design conservatively).")
+    lines.append(
+        f"Pinned default fallback substrate — use verbatim as dataset/dataset_pointer if you "
+        f"are not certain another named accession/atlas actually resolves: "
+        f"dataset={config.DEFAULT_DATASET!r}, dataset_pointer={config.DEFAULT_DATASET_POINTER!r}."
+    )
+    lines.append(f"Set \"hypothesis_id\" to exactly {candidate.id!r} in your JSON output.")
+    # Defense-in-depth (this is per-call USER content, not the frozen system
+    # prompt): spells out every required JSON key by name. The system
+    # prompt's own BUILD_SPEC.md-verbatim text names most fields in prose
+    # but never literally says "question" as a JSON key -- observed live to
+    # make the model substitute a reasonable synonym ("title") for exactly
+    # that one field. `question` is still parsed defensively either way
+    # (:data:`_QUESTION_FALLBACK_KEYS`); this line just reduces how often
+    # that fallback is needed at all, for this and any other field.
+    lines.append(
+        "Your STRICT JSON response must use exactly these top-level keys: "
+        '"hypothesis_id", "question", "dataset", "dataset_pointer", "method", '
+        '"protocol_steps", "confirm_if", "refute_if", "feasibility_notes", '
+        '"claude_science_prompt".'
+    )
+    user_content = "\n".join(lines)
+
+    parsed = await _ainvoke_json(llm, EXPERIMENT_DESIGNER_SYSTEM_PROMPT, user_content)
+    item = _coerce_dict(parsed, preferred_key="ExperimentPlan")
+
+    dataset = str(item.get("dataset") or "").strip()
+    dataset_pointer = item.get("dataset_pointer")
+    feasibility_notes = str(item.get("feasibility_notes") or "").strip()
+
+    if not dataset or not _is_recognized_dataset_pointer(dataset_pointer):
+        logger.info(
+            "design_experiment: falling back to the pinned default dataset for hypothesis %s "
+            "(model proposed dataset=%r dataset_pointer=%r)",
+            candidate.id,
+            dataset or None,
+            dataset_pointer,
+        )
+        dataset = config.DEFAULT_DATASET
+        dataset_pointer = config.DEFAULT_DATASET_POINTER
+        feasibility_notes = f"{feasibility_notes} {_FALLBACK_FEASIBILITY_NOTE}".strip()
+    else:
+        dataset_pointer = str(dataset_pointer).strip()
+
+    protocol_steps_raw = item.get("protocol_steps")
+    protocol_steps = (
+        [str(s).strip() for s in protocol_steps_raw if str(s).strip()]
+        if isinstance(protocol_steps_raw, list)
+        else []
+    )
+
+    question = _first_present_str(item, _QUESTION_FALLBACK_KEYS)
+    method = str(item.get("method") or "").strip()
+    confirm_if = str(item.get("confirm_if") or "").strip()
+    refute_if = str(item.get("refute_if") or "").strip()
+    claude_science_prompt = str(item.get("claude_science_prompt") or "").strip()
+
+    required = {
+        "question": question,
+        "method": method,
+        "protocol_steps": protocol_steps,
+        "confirm_if": confirm_if,
+        "refute_if": refute_if,
+        "claude_science_prompt": claude_science_prompt,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise TransBenchLLMError(
+            502,
+            "llm_bad_output",
+            f"Experiment designer response missing required field(s) {missing}: {parsed!r}",
+        )
+
+    try:
+        return ExperimentPlan(
+            hypothesis_id=candidate.id,
+            question=question,
+            dataset=dataset,
+            dataset_pointer=dataset_pointer,
+            method=method,
+            protocol_steps=protocol_steps,
+            confirm_if=confirm_if,
+            refute_if=refute_if,
+            feasibility_notes=feasibility_notes or _FALLBACK_FEASIBILITY_NOTE,
+            claude_science_prompt=claude_science_prompt,
+        )
+    except ValidationError as exc:
+        raise TransBenchLLMError(
+            502, "llm_bad_output", f"Experiment designer produced an invalid ExperimentPlan: {exc}"
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Agent 8 — Brief Assembler (Haiku, config.MODEL_CHEAP)
+# ---------------------------------------------------------------------------
+
+# BUILD_SPEC.md §4's TransBrief.top_experiment is a REQUIRED ExperimentPlan
+# (no Optional/default) -- schemas.py is frozen verbatim from the spec and
+# must never be changed to work around this. When
+# rigor.select_experiment_candidate returns None (every hypothesis this run
+# was either 'established' or ungrounded), run_assemble substitutes this
+# explicit, honestly-labeled SENTINEL ExperimentPlan instead -- schema-valid,
+# never a fabricated experiment, and its own prose says exactly why no real
+# design was produced so a reader (or the MCP client / Claude Science) can
+# never mistake it for a real recommendation.
+_NO_CANDIDATE_HYPOTHESIS_ID = "none"
+
+
+def _no_eligible_experiment_plan() -> ExperimentPlan:
+    return ExperimentPlan(
+        hypothesis_id=_NO_CANDIDATE_HYPOTHESIS_ID,
+        question=(
+            "No experiment was designed this run: no hypothesis was both "
+            "'open_question' and grounded (BUILD_SPEC.md §6(3) novelty "
+            "guard) -- every generated hypothesis was either judged "
+            "'established' (a textbook fact, not novel) or had zero "
+            "grounded supporting evidence."
+        ),
+        dataset=config.DEFAULT_DATASET,
+        dataset_pointer=config.DEFAULT_DATASET_POINTER,
+        method="N/A — no eligible hypothesis this run.",
+        protocol_steps=[
+            "N/A — no eligible hypothesis this run. Re-run with a different "
+            "observation, or review each hypothesis's own novelty/grounded "
+            "fields below to see why none qualified."
+        ],
+        confirm_if="N/A — no experiment was designed this run.",
+        refute_if="N/A — no experiment was designed this run.",
+        feasibility_notes=(
+            "No hypothesis satisfied the novelty guard (open_question AND "
+            "grounded) this run, so no dataset/protocol was designed. See "
+            "each hypothesis's own novelty/novelty_reason/grounded fields "
+            "for why."
+        ),
+        claude_science_prompt="N/A — no experiment was designed this run.",
+    )
+
+
+def _build_references(
+    graded_hypotheses: list[GradedHypothesis], registry_by_hyp_id: dict[str, Any]
+) -> list[Reference]:
+    """BUILD_SPEC.md §5 agent 8: "references via registry.to_reference_
+    list()". Each hypothesis retrieved (and built its own registry)
+    independently (BUILD_SPEC.md §3 fans retrieval out per-hypothesis), so
+    this merges every hypothesis's own ``ArticleRegistry.to_reference_
+    list()`` output, in hypothesis order, deduped by pmid (falling back to
+    url when pmid is absent -- an NCT/DOI-only item; the registry's own
+    "hard URL guarantee" means url is always present). Within EACH
+    hypothesis's own list, cited entries sort first (Iatronix's own
+    ``to_reference_list()`` contract) -- real, not merely requested, because
+    ``run_grade`` (agent 4, Phase 3/5) now calls ``registry.mark_used(...)``
+    for every article that actually became a kept ``EvidenceItem``.
+
+    Attaches ``grade`` from a matching graded ``EvidenceItem`` when one
+    exists across ANY hypothesis (the registry itself carries no grade --
+    that is agent 4's per-claim output, not a registry-level property) --
+    ``None`` for a retrieved-but-never-cited registry entry.
+    """
+    grade_by_key: dict[str, str] = {}
+    for gh in graded_hypotheses:
+        for ev in gh.evidence:
+            key = ev.reference.pmid or ev.reference.url
+            if key:
+                grade_by_key.setdefault(key, ev.grade)
+
+    seen: set[str] = set()
+    references: list[Reference] = []
+    for gh in graded_hypotheses:
+        registry = (registry_by_hyp_id or {}).get(gh.hypothesis.id)
+        if registry is None:
+            continue
+        for entry in registry.to_reference_list():
+            pmid = entry.get("pmid")
+            url = entry.get("url")
+            dedup_key = str(pmid) if pmid else str(url or "")
+            if not dedup_key or dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            year_raw = entry.get("year")
+            year = int(year_raw) if str(year_raw or "").isdigit() else None
+            references.append(
+                Reference(
+                    source=str(entry.get("source") or "Unknown"),
+                    title=entry.get("title"),
+                    year=year,
+                    url=url,
+                    pmid=str(pmid) if pmid else None,
+                    grade=grade_by_key.get(dedup_key),
+                )
+            )
+    return references
+
+
+def _collect_contradictions(graded_hypotheses: list[GradedHypothesis]) -> list[str]:
+    """BUILD_SPEC.md §5 agent 8: "collect contradictions" -- one entry per
+    ``EvidenceItem`` whose dedicated entailment pass (``rigor.run_entailment``,
+    agent 6) classified ``"refutes"``, across EVERY hypothesis (not only the
+    selected experiment candidate) -- a contradiction surfaced anywhere in
+    the run is reported, per BUILD_SPEC.md §0.6 ("grounded or it doesn't
+    ship") / §6(3) (auditability).
+    """
+    contradictions: list[str] = []
+    for gh in graded_hypotheses:
+        for ev in gh.evidence:
+            if ev.entailment == "refutes":
+                cite = ev.reference.pmid or ev.reference.url or "unresolved citation"
+                contradictions.append(f"[{gh.hypothesis.id}] {ev.claim_fragment} (grade={ev.grade}, {cite})")
+    return contradictions
+
+
+def _fallback_uncertainty_note(graded_hypotheses: list[GradedHypothesis], contradictions: list[str]) -> str:
+    """Deterministic, computed ``uncertainty_note`` used when agent 8's own
+    Haiku call fails or returns unusable JSON (see :func:`run_assemble`) --
+    still honest and specific (never a generic placeholder), built entirely
+    from already-real, already-validated pipeline output."""
+    established = sum(1 for gh in graded_hypotheses if gh.novelty == "established")
+    open_q = sum(1 for gh in graded_hypotheses if gh.novelty == "open_question")
+    unsupported = sum(1 for gh in graded_hypotheses if gh.novelty == "unsupported")
+    ungrounded = sum(1 for gh in graded_hypotheses if not gh.grounded)
+
+    parts = [
+        f"Of {len(graded_hypotheses)} generated hypothes{'is' if len(graded_hypotheses) == 1 else 'es'}, "
+        f"{open_q} were classified open_question, {established} established (textbook, not novel), "
+        f"and {unsupported} unsupported by retrieved evidence."
+    ]
+    if ungrounded:
+        parts.append(
+            f"{ungrounded} hypothesis(es) had zero grounded supporting evidence and were "
+            f"excluded from experiment design."
+        )
+    if contradictions:
+        parts.append(
+            f"{len(contradictions)} contradicting evidence item(s) were surfaced during retrieval "
+            f"and should be weighed against any supporting evidence."
+        )
+    parts.append("All findings are preliminary and require expert review before any downstream use.")
+    return " ".join(parts)
+
+
+async def run_assemble(state: dict, llm) -> TransBrief:
+    """Agent 8 — Brief Assembler (BUILD_SPEC.md §5/§8; Haiku,
+    ``config.MODEL_CHEAP``). Assembles the REAL final ``TransBrief`` from the
+    full pipeline's already-computed, real output (agents 1-7).
+
+    ``state`` keys read (all via ``.get`` with safe defaults — this function
+    never assumes a specific caller type; ``graph.py``'s ``TransBenchState``
+    TypedDict is a plain ``dict`` at runtime and satisfies this contract
+    directly, which is why the parameter is a plain ``dict`` rather than a
+    bespoke dataclass):
+      ``observation``, ``focus_drug``, ``axes``, ``graded_hypotheses``
+      (``list[GradedHypothesis]``, already built by ``graph.py``'s
+      ``_design_node``), ``top_experiment`` (an ``ExperimentPlan`` or
+      ``None``), ``registry_by_hyp_id``, ``retrieval_manifest_by_hyp_id``,
+      ``model_reasoning``, ``model_cheap``, ``max_hypotheses``,
+      ``retrieval_snapshot`` (the run's INPUT snapshot, if any),
+      ``run_started_at``.
+
+    Builds, in pure code (no LLM): ``references`` (:func:`_build_references`
+    — every hypothesis's ``registry.to_reference_list()``, merged + deduped)
+    and ``contradictions_surfaced`` (:func:`_collect_contradictions` — every
+    ``entailment=="refutes"`` item across all hypotheses). Makes exactly ONE
+    Haiku call (``BRIEF_ASSEMBLER_SYSTEM_PROMPT``) for the single prose
+    field, ``uncertainty_note`` — if that ONE call raises OR returns no
+    usable text, this is caught broadly and logged (never propagated), and
+    :func:`_fallback_uncertainty_note` computes a deterministic, still
+    -honest replacement instead. Rationale (long-term, not a shortcut): by
+    the time assembly runs, the pipeline has already made ~10+ real,
+    expensive, successfully-completed LLM calls (decompose, hypothesize,
+    every hypothesis's grade + entailment + novelty, and design) — discarding
+    that entire real ``TransBrief`` because the LAST, purely-cosmetic
+    summary sentence hit a transient JSON hiccup would be a strictly worse
+    failure mode than a computed-but-honest fallback sentence; the failure
+    is still logged, so it remains observable, never silently hidden.
+
+    ``TransBrief.top_experiment`` (BUILD_SPEC.md §4, frozen) is a REQUIRED
+    field, never ``Optional`` — when ``state["top_experiment"]`` is ``None``
+    (no hypothesis cleared the novelty guard this run), this substitutes
+    :func:`_no_eligible_experiment_plan`'s explicit sentinel
+    (``hypothesis_id="none"``) rather than fabricating a fake design or
+    breaking schema validation.
+
+    ``run_manifest`` is filled with models/temperature/caps/concurrency/
+    ``focus_drug``/whether a ``retrieval_snapshot`` was supplied on input/the
+    per-hypothesis retrieval snapshot actually captured this run (neutral +
+    pubmed queries and full abstracts, i.e. PMIDs, BUILD_SPEC.md §9)/the
+    selected experiment's hypothesis id and ``dataset_pointer``/
+    ``run_started_at``/``generated_at``/:func:`current_token_spend`'s
+    running total (already includes this function's own ``uncertainty_note``
+    call, since that call happens before ``run_manifest`` is built below).
+    """
+    observation = state.get("observation", "")
+    focus_drug = state.get("focus_drug")
+    axes = state.get("axes") or []
+    graded_hypotheses: list[GradedHypothesis] = state.get("graded_hypotheses") or []
+    top_experiment: Optional[ExperimentPlan] = state.get("top_experiment")
+    registry_by_hyp_id = state.get("registry_by_hyp_id") or {}
+    retrieval_manifest_by_hyp_id = state.get("retrieval_manifest_by_hyp_id") or {}
+
+    references = _build_references(graded_hypotheses, registry_by_hyp_id)
+    contradictions = _collect_contradictions(graded_hypotheses)
+
+    user_lines = ["Graded hypotheses:"]
+    for gh in graded_hypotheses:
+        h = gh.hypothesis
+        user_lines.append(
+            f"- {h.id} [{h.axis}] novelty={gh.novelty} confidence={gh.confidence} "
+            f"grounded={gh.grounded} supporting={gh.supporting_count} "
+            f"contradicting={gh.contradicting_count}: {h.statement}"
+        )
+        user_lines.append(f"  novelty_reason: {gh.novelty_reason}")
+    if contradictions:
+        user_lines.append("Contradictions surfaced during retrieval:")
+        for c in contradictions:
+            user_lines.append(f"- {c}")
+    else:
+        user_lines.append("No contradicting evidence was surfaced during retrieval.")
+    if top_experiment is not None:
+        user_lines.append(f"An experiment was designed for hypothesis {top_experiment.hypothesis_id}.")
+    else:
+        user_lines.append("No hypothesis was eligible for experiment design this run.")
+    user_content = "\n".join(user_lines)
+
+    uncertainty_note = ""
+    try:
+        parsed = await _ainvoke_json(llm, BRIEF_ASSEMBLER_SYSTEM_PROMPT, user_content)
+        item = _coerce_dict(parsed)
+        uncertainty_note = str(item.get("uncertainty_note") or "").strip()
+    except Exception:  # noqa: BLE001 -- deliberate: see run_assemble's docstring rationale
+        logger.exception(
+            "run_assemble: uncertainty_note LLM call failed or returned unusable JSON -- "
+            "falling back to a deterministic, computed note rather than discarding an "
+            "otherwise-complete, already-expensive brief"
+        )
+    if not uncertainty_note:
+        uncertainty_note = _fallback_uncertainty_note(graded_hypotheses, contradictions)
+
+    if top_experiment is None:
+        top_experiment = _no_eligible_experiment_plan()
+
+    generated_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    run_manifest: dict[str, Any] = {
+        "reuse_source": REUSE_SOURCE,
+        "model_reasoning": state.get("model_reasoning", config.MODEL_REASONING),
+        "model_cheap": state.get("model_cheap", config.MODEL_CHEAP),
+        "temperature": config.TEMPERATURE,
+        "max_hypotheses": state.get("max_hypotheses", config.MAX_HYPOTHESES),
+        "abstract_cap": config.ABSTRACT_CAP,
+        "concurrency": config.CONCURRENCY,
+        "focus_drug": focus_drug,
+        "retrieval_snapshot_provided": state.get("retrieval_snapshot") is not None,
+        "retrieval_snapshot": retrieval_manifest_by_hyp_id,
+        "selected_experiment_hypothesis_id": top_experiment.hypothesis_id,
+        "dataset_pointer": top_experiment.dataset_pointer,
+        "run_started_at": state.get("run_started_at"),
+        "generated_at": generated_at,
+        "token_spend": current_token_spend(),
+    }
+
+    return TransBrief(
+        request_echo=observation,
+        axes=axes,
+        hypotheses=graded_hypotheses,
+        top_experiment=top_experiment,
+        references=references,
+        contradictions_surfaced=contradictions,
+        uncertainty_note=uncertainty_note,
+        run_manifest=run_manifest,
+    )

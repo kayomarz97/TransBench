@@ -65,6 +65,20 @@ ABSTRACT_CAP: int = 8
 CONCURRENCY: int = 3
 TEMPERATURE: int = 0
 
+# --- Experiment-design fallback substrate (BUILD_SPEC.md §5/§8: "Pinned
+# dataset (reproducibility)") -- a real, versioned, publicly downloadable
+# human single-cell atlas with a T-cell compartment, guaranteed to resolve.
+# `agents.run_design_experiment` (Phase 5) falls back to this whenever the
+# model's own proposed dataset/dataset_pointer is empty or not a well-formed
+# https URL to a recognized public dataset host ("never emit a fabricated/
+# guessed accession"); `agents.run_assemble`'s "no eligible experiment"
+# sentinel (when no hypothesis clears the novelty guard) also points here so
+# even that placeholder names a real, resolvable substrate rather than
+# nothing at all. Single source of truth -- both call sites import this,
+# never a locally-duplicated literal.
+DEFAULT_DATASET: str = "Tabula Sapiens (immune compartment)"
+DEFAULT_DATASET_POINTER: str = "https://tabula-sapiens-portal.ds.czbiohub.org/"
+
 # --- BYOK / runtime env (never hardcode secrets; BUILD_SPEC.md §0.4, .env.example) ---
 # Feeds the *engine's* own Anthropic calls via ``create_llm(..., user_key=...)``
 # (independent of Claude Science, which is only the MCP client). No fallback key.
