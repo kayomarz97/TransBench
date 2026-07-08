@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "transbench"
 version = "0.1.0"
@@ -22,6 +26,9 @@ dependencies = [
 
 [tool.uv.sources]
 iatronix-backend = { path = "/root/projects/med-ai-project/backend", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [dependency-groups]
 # Test tooling only -- deliberately NOT in [project].dependencies (BUILD_SPEC §1's
