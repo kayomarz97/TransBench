@@ -14,13 +14,18 @@ confirmed live, twice, that a host-only check lets a real-but-topically
 -unrelated accession through) before ever accepting it — see
 :func:`_verify_dataset_pointer`'s module comment for the two confirmed-live
 mismatches that motivated this. Post-Phase-7 FINAL-GATE (Opus DETERMINISM
--suite finding): :func:`_normalize_enum_field` now also SALVAGES compound
-enum labels (e.g. a real failing run's ``"drug_pk_metabolism ×
-genetic_pharmacogenomic"``) instead of leaving them to fail Pydantic
-validation outright — see that function's own docstring for the full
-before/after; this closes the gap where every hypothesis in a run
-happening to carry a compound axis could zero out the whole batch and raise
-a spurious ``502 llm_bad_output`` for an otherwise-perfectly-good run.
+-suite finding, two rounds): :func:`_normalize_enum_field` now also
+SALVAGES compound enum labels — e.g. real failing runs' ``"drug_pk_metabolism
+× genetic_pharmacogenomic"`` and ``"renal_volume + immune_inflammatory"`` —
+by splitting on ANY run of non-word characters (separator-AGNOSTIC, not a
+whitelist of specific known separators — round 1 whitelisted ``×``/``x``/
+``,``/``/``/``;``/``|``/"and" and still missed a plain ``+`` on the very
+next failing run, which round 2 fixed by generalizing) instead of leaving
+compound labels to fail Pydantic validation outright — see that function's
+own docstring for the full before/after; this closes the gap where every
+hypothesis in a run happening to carry a compound axis could zero out the
+whole batch and raise a spurious ``502 llm_bad_output`` for an otherwise
+-perfectly-good run.
 
 Agents 1-2 follow the shape ``async run_<name>(payload: dict, llm) -> ...``
 (BUILD_SPEC.md §5), taking a PRE-BUILT, temperature-0-bound client. Agents 3-4
@@ -263,30 +268,38 @@ _AXIS_VALUES = frozenset(get_args(Axis))
 _PRIORITY_VALUES = frozenset(get_args(Priority))
 _GRADE_VALUES = frozenset(get_args(EvidenceGrade))
 
-# Compound-label salvage (FINAL-GATE DETERMINISM fix, Opus verification):
-# an LLM occasionally returns a MULTI-VALUE label for a field that must be a
-# single schema Literal — confirmed on a real failing run: the hypothesis
-# generator returned ``axis`` values like ``"drug_pk_metabolism ×
-# genetic_pharmacogenomic"`` and ``"immune_inflammatory × renal_volume"``
-# (apparently treating the axis field like the free-text, multi-axis
-# grounding context from agent 1 rather than a single enum pick). Splits on
-# every separator such a compound label realistically uses to join two
-# labels: the multiplication sign (the literal character observed live), a
-# standalone ``x``/``X`` (word-boundary so it can never fire INSIDE a real
-# token — no schema Literal in this codebase contains a bare "x": checked
-# directly against Axis/Priority/EvidenceGrade/NoveltyVerdict/entailment),
-# comma, slash, semicolon, pipe, or the word "and" (also word-boundary, so
-# e.g. a hypothetical "brand" is never mis-split).
-_ENUM_LABEL_SEPARATOR_RE = re.compile(r"\s*(?:×|\bx\b|,|/|;|\||\band\b)\s*", re.IGNORECASE)
+# Compound-label salvage (FINAL-GATE DETERMINISM fix, Opus verification —
+# round 2): an LLM occasionally returns a MULTI-VALUE label for a field that
+# must be a single schema Literal — confirmed on TWO separate real failing
+# runs, joined with TWO DIFFERENT separators each time: round 1 used the
+# multiplication sign (``"drug_pk_metabolism × genetic_pharmacogenomic"``,
+# ``"immune_inflammatory × renal_volume"``); round 2 used a plain ``" + "``
+# (``"renal_volume + immune_inflammatory"``) — a separator a round-1
+# whitelist-of-known-separators regex did not (and structurally never could
+# fully) cover, since the model is free to pick yet another one next time
+# (``"&"``, ``"-"``, an em/en dash, a newline, ...). SEPARATOR-AGNOSTIC fix
+# (round 2, replacing the round-1 whitelist): every schema Literal in this
+# codebase (Axis/Priority/EvidenceGrade/NoveltyVerdict/entailment) is
+# composed ONLY of ``[a-z_]`` — lowercase letters and underscores, both
+# ``\w`` word characters — so splitting the lowered value on ANY RUN of
+# non-word characters (``\W+``) leaves every real token
+# (``renal_volume``/``immune_inflammatory``/``systematic_review``/...)
+# intact while treating literally anything else (space, ``+``, ``&``,
+# ``×``, ``-``, an em/en dash, ``,``, ``/``, ``;``, ``|``, the word "and"
+# surrounded by spaces, a newline, ...) as a separator — uniformly, with no
+# enumeration to fall one separator behind the model on a future run.
+_ENUM_LABEL_SPLIT_RE = re.compile(r"\W+")
 
 
 def _normalize_enum_field(item: dict, field: str, valid_values: frozenset[str]) -> None:
     """Canonicalize ``item[field]`` to the schema's exact Literal casing, in
     place — salvaging what can genuinely be salvaged from what the model
     actually returned, never inventing or guessing a value it didn't say.
-    Two passes, in order; either can leave ``item[field]`` unchanged:
+    Three passes, in order; any of them can leave ``item[field]`` unchanged:
 
-    1. Case-insensitive EXACT match (original Phase 2 behavior). Long-term
+    1. Exact match (``value in valid_values``) — already correct, no-op.
+
+    2. Case-insensitive EXACT match (original Phase 2 behavior). Long-term
        -fix rationale (not a one-off patch): confirmed empirically on the
        live flagship run that Sonnet returns ``"priority": "HIGH"`` /
        ``"MEDIUM"`` despite the STRICT-JSON prompt listing the field name in
@@ -295,28 +308,31 @@ def _normalize_enum_field(item: dict, field: str, valid_values: frozenset[str]) 
        lowercase-enum convention. Rejecting semantically-perfect hypotheses
        over pure casing would be fragile.
 
-    2. COMPOUND-LABEL salvage (FINAL-GATE DETERMINISM fix — see
-       :data:`_ENUM_LABEL_SEPARATOR_RE`'s comment for the real failing-run
-       values that motivated this): if there is no exact (cased or
-       case-insensitive) match, the value might be TWO OR MORE otherwise
-       -valid members joined together. Splits the raw value on
-       :data:`_ENUM_LABEL_SEPARATOR_RE` and takes the FIRST token that IS a
-       valid member, case-insensitively — not simply "the first token
-       unconditionally": an invalid leading token (e.g. ``"cardiac ×
-       renal_volume"``) is skipped in favor of the next token that IS valid
-       (``"renal_volume"``). Before this pass existed, a compound label was
-       left untouched, Pydantic then rejected the WHOLE item (a single
-       Literal field can never hold two values), and when EVERY generated
+    3. COMPOUND-LABEL salvage, SEPARATOR-AGNOSTIC (FINAL-GATE DETERMINISM
+       fix, round 2 — see :data:`_ENUM_LABEL_SPLIT_RE`'s comment for the two
+       real failing-run separators, ``×`` and ``+``, that motivated
+       generalizing this): if there is no exact match, the value might be
+       TWO OR MORE otherwise-valid members joined by ANY non-word-character
+       separator. Splits ``value.strip().lower()`` on
+       :data:`_ENUM_LABEL_SPLIT_RE` (``\\W+`` — any run of non-word chars;
+       empty tokens dropped) and takes the FIRST resulting token that IS a
+       valid member — not simply "the first token unconditionally": an
+       invalid leading token (e.g. ``"cardiac + renal_volume"``) is skipped
+       in favor of the next token that IS valid (``"renal_volume"``).
+       Before ANY version of this pass existed, a compound label was left
+       untouched, Pydantic then rejected the WHOLE item (a single Literal
+       field can never hold two values), and when EVERY generated
        hypothesis happened to carry a compound axis, the entire hypothesize
        call zeroed out -> ``TransBenchLLMError [502 llm_bad_output]`` for a
        run that actually had 3 perfectly good, on-topic hypotheses.
 
-    If NEITHER pass finds a valid member anywhere in the value, it is left
-    completely UNCHANGED and Pydantic's own validation rejects it with its
-    normal clear error (so a truly invalid value, e.g. ``"axis":
-    "cardiac"``, still fails loudly rather than being silently coerced to
-    something plausible-looking — this preserves strictness against
-    genuinely-invalid values; it is a genuine *salvage*, never a guess).
+    If NEITHER pass 2 NOR pass 3 finds a valid member anywhere in the value,
+    it is left completely UNCHANGED and Pydantic's own validation rejects it
+    with its normal clear error (so a truly invalid value, e.g. ``"axis":
+    "cardiac"`` or ``"cardiac + pulmonary"``, still fails loudly rather than
+    being silently coerced to something plausible-looking — this preserves
+    strictness against genuinely-invalid values; it is a genuine *salvage*,
+    never a guess).
 
     Reused by every agent with an enum-valued LLM output field — axis
     (decompose/hypothesize), priority (hypothesize), grade (grade), novelty
@@ -333,13 +349,13 @@ def _normalize_enum_field(item: dict, field: str, valid_values: frozenset[str]) 
         item[field] = lowered
         return
 
-    for token in _ENUM_LABEL_SEPARATOR_RE.split(value):
-        token_normalized = token.strip().lower()
-        if token_normalized in valid_values:
-            item[field] = token_normalized
+    for token in _ENUM_LABEL_SPLIT_RE.split(lowered):
+        if token and token in valid_values:
+            item[field] = token
             return
     # No valid member found anywhere (exact, cased, or as a compound-label
-    # component) -- leave item[field] exactly as the model returned it.
+    # component split on ANY non-word separator) -- leave item[field]
+    # exactly as the model returned it.
 
 
 def _coerce_bool(value: Any) -> bool:
