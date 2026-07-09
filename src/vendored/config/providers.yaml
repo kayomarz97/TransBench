@@ -1,0 +1,229 @@
+# =============================================================================
+# Iatronix — SINGLE SOURCE OF TRUTH for all LLM providers & models.
+#
+# Edit THIS ONE FILE to add/enable/disable a provider or model. The backend
+# loads it at startup (provider_registry.py); GET /api/providers serves the
+# enabled subset to the frontend. No provider/model strings live anywhere else.
+#
+# To activate a provider: set `enabled: true` and ensure users can supply a key.
+# To add a model: add an entry under that provider's `models:` list.
+#
+# Pricing/model-IDs verified against live docs 2026-05-31 (see INTEGRATION_NOTES.md).
+# All prices are USD per 1,000,000 tokens.
+# =============================================================================
+
+version: 1
+default_provider: cerebras
+
+# Deep-grounded citation-chasing bounds (Phase 5). Registry-configurable.
+deep_search:
+  max_depth: 3                  # citation hops per branch (tightened from 5 for snappier UX)
+  branch_parallelism: 6         # concurrent search branches
+  total_budget_seconds: 25      # hard wall-clock ceiling (tightened from 120 — only fires when retrieval is thin)
+  per_branch_timeout_seconds: 8
+
+# cache_class semantics (see INTEGRATION_NOTES §C):
+#   inline       -> Anthropic-style cache_control breakpoints on content blocks
+#   auto_prefix  -> server auto-caches a stable prompt prefix (no request flag); keep prefix byte-identical & first
+#   stateful     -> Gemini CachedContent object lifecycle (create -> attach by handle -> delete)
+#   conditional  -> OpenRouter: inline passthrough only when routing an Anthropic/explicit-cache model, else no-op
+
+providers:
+
+  # ---- ACTIVE -------------------------------------------------------------
+  cerebras:
+    display: "Cerebras"
+    enabled: true
+    client_kind: openai_compatible
+    base_url: https://api.cerebras.ai/v1
+    key_column: cerebras_api_key
+    key_prefix: "csk-"
+    signup_url: https://cloud.cerebras.ai
+    blurb: "Default provider. Fast, accurate medical reasoning. Your key is encrypted at rest."
+    cache_class: auto_prefix
+    supports_vision: false
+    embedding_model: null
+    default_model: gpt-oss-120b
+    validation:
+      probe_model: gpt-oss-120b
+    # Cerebras must NOT receive frequency_penalty/presence_penalty/logit_bias (400). INTEGRATION_NOTES D2.
+    models:
+      - id: gpt-oss-120b
+        display: "GPT-OSS 120B"
+        input: 0.35
+        output: 0.75
+        context_window: 131072
+        supports_caching: true        # officially cache-enabled (INTEGRATION_NOTES A5)
+        tier: 2
+        roles: [generate, classify, bluf, section]
+      - id: llama-3.3-70b
+        display: "Llama 3.3 70B"
+        input: 0.85          # UNVERIFIED (3rd-party) — confirm via GET /v1/models before relying
+        output: 1.20
+        context_window: 131072
+        supports_caching: false       # NOT in Cerebras cache-enabled list
+        tier: 2
+        roles: []
+
+  anthropic:
+    display: "Anthropic (Claude)"
+    enabled: true
+    client_kind: anthropic
+    base_url: https://api.anthropic.com
+    key_column: anthropic_api_key
+    key_prefix: "sk-ant-"
+    signup_url: https://console.anthropic.com
+    blurb: "Claude models. Your key is encrypted at rest, never exposed server-side."
+    cache_class: inline
+    supports_vision: true
+    embedding_model: voyage-3         # via the user's voyage_api_key (service key)
+    default_model: claude-haiku-4-5-20251001
+    validation:
+      probe_model: claude-haiku-4-5-20251001
+      api_version: "2023-06-01"
+    models:
+      - id: claude-haiku-4-5-20251001
+        display: "Claude Haiku 4.5"
+        input: 1.00
+        output: 5.00
+        cache_write_5m: 1.25
+        cache_write_1h: 2.00
+        cache_read: 0.10
+        min_cache_tokens: 4096        # Haiku 4.5 floor is 4096, NOT 1024 (INTEGRATION_NOTES A6)
+        context_window: 200000
+        supports_caching: true
+        tier: 1
+        roles: [classify, generate]
+      - id: claude-sonnet-4-6
+        display: "Claude Sonnet 4.6"
+        input: 3.00
+        output: 15.00
+        cache_write_5m: 3.75
+        cache_write_1h: 6.00
+        cache_read: 0.30
+        min_cache_tokens: 1024
+        context_window: 200000
+        supports_caching: true
+        tier: 2
+        roles: [sonnet_fallback, vision]   # vision = Waves spirometry
+      # claude-sonnet-4-20250514 RETIRES 2026-06-15 — intentionally omitted as a default.
+
+  # ---- WIRED BUT DISABLED (flip `enabled: true` to activate FE + BE) ------
+  # Provider id is "gemini" to match the existing codebase vocabulary
+  # (gemini_api_key column, embedder/rag_pipeline checks). Display says Google.
+  gemini:
+    display: "Google (Gemini)"
+    enabled: false
+    client_kind: google_genai
+    base_url: https://generativelanguage.googleapis.com
+    key_column: gemini_api_key
+    key_prefix: ""                    # Google keys (AIza…) have no enforced prefix
+    cache_class: stateful
+    supports_vision: true
+    embedding_model: gemini-embedding-001   # text-embedding-004 was SHUT DOWN 2026-01-14 (A2)
+    default_model: gemini-3.5-flash
+    validation:
+      probe_model: gemini-3.5-flash
+    models:
+      - id: gemini-3.5-flash
+        display: "Gemini 3.5 Flash"
+        input: 1.50
+        output: 9.00
+        cache_read: 0.15
+        cache_storage_per_hour: 1.00  # Gemini charges hourly storage on explicit caches
+        min_cache_tokens: 1024
+        context_window: 1048576
+        supports_caching: true
+        tier: 2
+        roles: [generate, classify]
+      - id: gemini-2.5-flash
+        display: "Gemini 2.5 Flash"
+        input: 0.30
+        output: 2.50
+        cache_read: 0.03
+        min_cache_tokens: 1024
+        context_window: 1048576
+        supports_caching: true
+        tier: 1
+        roles: []
+
+  xai:
+    display: "xAI (Grok)"
+    enabled: false
+    client_kind: openai_compatible
+    base_url: https://api.x.ai/v1
+    key_column: xai_api_key           # NEW DB column — added by the KeyStore migration (Phase 3 step 6b)
+    key_prefix: "xai-"
+    cache_class: auto_prefix
+    supports_vision: false
+    embedding_model: null
+    default_model: grok-4.3
+    validation:
+      probe_model: grok-4.3
+    models:
+      - id: grok-4.3
+        display: "Grok 4.3"
+        input: 1.25
+        output: 2.50
+        context_window: 1048576
+        supports_caching: true        # automatic prefix; apply_cache is a no-op
+        tier: 2
+        roles: [generate, classify]
+
+  openai:
+    display: "OpenAI"
+    enabled: false
+    client_kind: openai_compatible
+    base_url: https://api.openai.com/v1
+    key_column: openai_api_key
+    key_prefix: "sk-"
+    cache_class: auto_prefix
+    supports_vision: true
+    embedding_model: text-embedding-3-small
+    default_model: gpt-4o-mini
+    validation:
+      probe_model: gpt-4o-mini
+    models:
+      - id: gpt-4o-mini
+        display: "GPT-4o mini"
+        input: 0.15
+        output: 0.60
+        context_window: 128000
+        supports_caching: true        # automatic >=1024-token prefix; apply_cache no-op
+        tier: 1
+        roles: [generate, classify]
+
+  openrouter:
+    display: "OpenRouter"
+    enabled: false
+    client_kind: openai_compatible
+    base_url: https://openrouter.ai/api/v1
+    key_column: openrouter_key
+    key_prefix: "sk-or-"
+    cache_class: conditional
+    supports_vision: false
+    embedding_model: null
+    default_model: google/gemma-4-31b-it
+    oauth:
+      auth_url: https://openrouter.ai/auth
+      token_url: https://openrouter.ai/api/v1/auth/keys
+      callback_base_env: OPENROUTER_CALLBACK_BASE
+    validation:
+      probe_model: google/gemma-4-31b-it
+    models:
+      - id: google/gemma-4-31b-it
+        display: "Gemma 4 31B"
+        input: 0.12
+        output: 0.37
+        context_window: 262144
+        supports_caching: false       # Gemma has no explicit caching on OpenRouter
+        tier: 2
+        roles: [generate]
+      - id: "meta-llama/llama-3.3-70b-instruct:free"
+        display: "Llama 3.3 70B (free)"
+        input: 0.0
+        output: 0.0
+        context_window: 131072
+        supports_caching: false
+        tier: 2
+        roles: [meta_fallback]

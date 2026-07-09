@@ -13,14 +13,24 @@ requires-python = ">=3.11"
 # BYOK key in .env -- required for the engine's own Anthropic calls to work uniformly
 # across tests, the engine, and (Phase 6) the MCP server.
 dependencies = [
-    "iatronix-backend",
+    # NOTE: iatronix-backend is deliberately NOT a hard dependency. TransBench is now
+    # self-contained via `src/vendored/` (reuse.py's Path B fallback), so a fresh clone
+    # installs with a plain `uv sync` and runs on the vendored copy — no external path,
+    # no shared keys. Drop an ANTHROPIC_API_KEY in `.env` and run. To develop against the
+    # LIVE Iatronix source instead (Path A, REUSE_SOURCE=installed_iatronix), editable-install
+    # it yourself:  uv pip install --no-deps -e /path/to/med-ai-project/backend
     "mcp",
     "langgraph",
     "langchain",
     "langchain-anthropic",
     "langchain-core",
     "anthropic",
-    "httpx",
+    # httpx[socks] (not plain httpx): Claude Science runs this server inside a sandbox that
+    # forces ALL outbound traffic through a SOCKS proxy (ALL_PROXY/HTTPS_PROXY=socks5://…).
+    # Every network path here is httpx-backed (anthropic SDK, agents.py GEO fetch, the Iatronix
+    # backend's PubMed client), so httpx must carry `socksio` or the first call dies with
+    # `ImportError: Using SOCKS proxy, but the 'socksio' package is not installed` (HTTP 500).
+    "httpx[socks]",
     "pydantic>=2",
     "pydantic-settings",
     "pyyaml",
@@ -30,11 +40,24 @@ dependencies = [
     "python-dotenv",
 ]
 
-[tool.uv.sources]
-iatronix-backend = { path = "/root/projects/med-ai-project/backend", editable = true }
+# [tool.uv.sources] intentionally omitted: no machine-specific local paths are shipped in
+# this repo (see the iatronix note in [project].dependencies). This keeps a clone install
+# clean and path-free — `src/vendored/` is the default backend. The lazily-imported extras
+# the vendored copy can use (lxml/pdfplumber/redis for optional PDF/cache paths TransBench's
+# core grounding never hits) are intentionally not pinned; install them only if you exercise
+# those paths.
 
 [tool.setuptools.packages.find]
 where = ["src"]
+# Packages both `transbench` and the self-contained `vendored` Iatronix mirror from src/.
+
+[tool.setuptools.package-data]
+# The vendored mirror reads two data files relative to its package root at runtime:
+# provider_registry.py -> config/providers.yaml (REQUIRED, hard-fails without it);
+# data_fetcher.py -> data/medical_journals.json (journal-impact registry, graceful if absent).
+# Ship them inside the `vendored` package so wheel builds include them (editable/src-layout
+# clones already have them on disk).
+vendored = ["config/*.yaml", "data/*.json"]
 
 [dependency-groups]
 # Test tooling only -- deliberately NOT in [project].dependencies (BUILD_SPEC §1's

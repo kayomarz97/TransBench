@@ -1,0 +1,303 @@
+{
+  "_meta": {
+    "description": "Ranked medical journals by specialty for targeted PubMed/source searches. Rank 1 = highest authority.",
+    "updated": "2026-03-25",
+    "fields": {
+      "rank": "Authority rank within specialty (1 = top)",
+      "pubmed": "Whether indexed in PubMed/MEDLINE",
+      "issn": "ISSN for PubMed journal filter",
+      "abbrev": "NLM journal abbreviation (for PubMed TA field)",
+      "society": "Publishing society/organization if applicable"
+    }
+  },
+
+  "general_medicine": [
+    {"rank": 1, "name": "New England Journal of Medicine", "abbrev": "N Engl J Med", "issn": "0028-4793", "pubmed": true, "society": "Massachusetts Medical Society"},
+    {"rank": 2, "name": "The Lancet", "abbrev": "Lancet", "issn": "0140-6736", "pubmed": true, "society": "Elsevier"},
+    {"rank": 3, "name": "JAMA", "abbrev": "JAMA", "issn": "0098-7484", "pubmed": true, "society": "American Medical Association"},
+    {"rank": 4, "name": "BMJ", "abbrev": "BMJ", "issn": "0959-8138", "pubmed": true, "society": "BMJ Publishing Group"},
+    {"rank": 5, "name": "Annals of Internal Medicine", "abbrev": "Ann Intern Med", "issn": "0003-4819", "pubmed": true, "society": "American College of Physicians"},
+    {"rank": 6, "name": "Nature Medicine", "abbrev": "Nat Med", "issn": "1078-8956", "pubmed": true, "society": "Nature Publishing Group"},
+    {"rank": 7, "name": "PLOS Medicine", "abbrev": "PLoS Med", "issn": "1549-1676", "pubmed": true, "society": "Public Library of Science"},
+    {"rank": 8, "name": "Canadian Medical Association Journal", "abbrev": "CMAJ", "issn": "0820-3946", "pubmed": true, "society": "CMA"},
+    {"rank": 9, "name": "Medical Journal of Australia", "abbrev": "Med J Aust", "issn": "0025-729X", "pubmed": true, "society": "AMPCo"}
+  ],
+
+  "cardiology": [
+    {"rank": 1, "name": "Circulation", "abbrev": "Circulation", "issn": "0009-7322", "pubmed": true, "society": "American Heart Association"},
+    {"rank": 2, "name": "Journal of the American College of Cardiology", "abbrev": "J Am Coll Cardiol", "issn": "0735-1097", "pubmed": true, "society": "ACC"},
+    {"rank": 3, "name": "European Heart Journal", "abbrev": "Eur Heart J", "issn": "0195-668X", "pubmed": true, "society": "European Society of Cardiology"},
+    {"rank": 4, "name": "JAMA Cardiology", "abbrev": "JAMA Cardiol", "issn": "2380-6583", "pubmed": true, "society": "AMA"},
+    {"rank": 5, "name": "Heart", "abbrev": "Heart", "issn": "1355-6037", "pubmed": true, "society": "BMJ/BCS"},
+    {"rank": 6, "name": "Circulation Research", "abbrev": "Circ Res", "issn": "0009-7330", "pubmed": true, "society": "AHA"},
+    {"rank": 7, "name": "Nature Reviews Cardiology", "abbrev": "Nat Rev Cardiol", "issn": "1759-5002", "pubmed": true, "society": "Nature"},
+    {"rank": 8, "name": "Heart Rhythm", "abbrev": "Heart Rhythm", "issn": "1547-5271", "pubmed": true, "society": "Heart Rhythm Society"},
+    {"rank": 9, "name": "Indian Heart Journal", "abbrev": "Indian Heart J", "issn": "0019-4832", "pubmed": true, "society": "Cardiological Society of India"},
+    {"rank": 10, "name": "Journal of Cardiovascular Translational Research", "abbrev": "J Cardiovasc Transl Res", "issn": "1937-5387", "pubmed": true, "society": null}
+  ],
+
+  "oncology": [
+    {"rank": 1, "name": "Journal of Clinical Oncology", "abbrev": "J Clin Oncol", "issn": "0732-183X", "pubmed": true, "society": "ASCO"},
+    {"rank": 2, "name": "Lancet Oncology", "abbrev": "Lancet Oncol", "issn": "1470-2045", "pubmed": true, "society": "Elsevier"},
+    {"rank": 3, "name": "Cancer Cell", "abbrev": "Cancer Cell", "issn": "1535-6108", "pubmed": true, "society": "Cell Press"},
+    {"rank": 4, "name": "Nature Cancer", "abbrev": "Nat Cancer", "issn": "2662-1347", "pubmed": true, "society": "Nature"},
+    {"rank": 5, "name": "JAMA Oncology", "abbrev": "JAMA Oncol", "issn": "2374-2437", "pubmed": true, "society": "AMA"},
+    {"rank": 6, "name": "Annals of Oncology", "abbrev": "Ann Oncol", "issn": "0923-7534", "pubmed": true, "society": "ESMO"},
+    {"rank": 7, "name": "Cancer Research", "abbrev": "Cancer Res", "issn": "0008-5472", "pubmed": true, "society": "AACR"},
+    {"rank": 8, "name": "Clinical Cancer Research", "abbrev": "Clin Cancer Res", "issn": "1078-0432", "pubmed": true, "society": "AACR"},
+    {"rank": 9, "name": "Cancer", "abbrev": "Cancer", "issn": "0008-543X", "pubmed": true, "society": "American Cancer Society"},
+    {"rank": 10, "name": "NCCN Guidelines (Journal of NCCN)", "abbrev": "J Natl Compr Canc Netw", "issn": "1540-1405", "pubmed": true, "society": "NCCN"},
+    {"rank": 11, "name": "Indian Journal of Cancer", "abbrev": "Indian J Cancer", "issn": "0019-509X", "pubmed": true, "society": "Indian Cancer Society"}
+  ],
+
+  "neurology": [
+    {"rank": 1, "name": "Lancet Neurology", "abbrev": "Lancet Neurol", "issn": "1474-4422", "pubmed": true, "society": "Elsevier"},
+    {"rank": 2, "name": "Annals of Neurology", "abbrev": "Ann Neurol", "issn": "0364-5134", "pubmed": true, "society": "American Neurological Association"},
+    {"rank": 3, "name": "Neurology", "abbrev": "Neurology", "issn": "0028-3878", "pubmed": true, "society": "American Academy of Neurology"},
+    {"rank": 4, "name": "JAMA Neurology", "abbrev": "JAMA Neurol", "issn": "2168-6149", "pubmed": true, "society": "AMA"},
+    {"rank": 5, "name": "Brain", "abbrev": "Brain", "issn": "0006-8950", "pubmed": true, "society": "Oxford University Press"},
+    {"rank": 6, "name": "Nature Reviews Neurology", "abbrev": "Nat Rev Neurol", "issn": "1759-4758", "pubmed": true, "society": "Nature"},
+    {"rank": 7, "name": "Stroke", "abbrev": "Stroke", "issn": "0039-2499", "pubmed": true, "society": "AHA/ASA"},
+    {"rank": 8, "name": "Epilepsia", "abbrev": "Epilepsia", "issn": "0013-9580", "pubmed": true, "society": "ILAE"},
+    {"rank": 9, "name": "Annals of Indian Academy of Neurology", "abbrev": "Ann Indian Acad Neurol", "issn": "0972-2327", "pubmed": true, "society": "IAN"}
+  ],
+
+  "pulmonology": [
+    {"rank": 1, "name": "American Journal of Respiratory and Critical Care Medicine", "abbrev": "Am J Respir Crit Care Med", "issn": "1073-449X", "pubmed": true, "society": "ATS"},
+    {"rank": 2, "name": "Lancet Respiratory Medicine", "abbrev": "Lancet Respir Med", "issn": "2213-2600", "pubmed": true, "society": "Elsevier"},
+    {"rank": 3, "name": "European Respiratory Journal", "abbrev": "Eur Respir J", "issn": "0903-1936", "pubmed": true, "society": "ERS"},
+    {"rank": 4, "name": "CHEST", "abbrev": "Chest", "issn": "0012-3692", "pubmed": true, "society": "American College of Chest Physicians"},
+    {"rank": 5, "name": "Thorax", "abbrev": "Thorax", "issn": "0040-6376", "pubmed": true, "society": "BMJ/BTS"},
+    {"rank": 6, "name": "Respiratory Medicine", "abbrev": "Respir Med", "issn": "0954-6111", "pubmed": true, "society": null},
+    {"rank": 7, "name": "Indian Journal of Chest Diseases and Allied Sciences", "abbrev": "Indian J Chest Dis Allied Sci", "issn": "0377-9343", "pubmed": false, "society": "VPCI"},
+    {"rank": 8, "name": "Lung India", "abbrev": "Lung India", "issn": "0970-2113", "pubmed": true, "society": "Indian Chest Society"}
+  ],
+
+  "endocrinology": [
+    {"rank": 1, "name": "Lancet Diabetes & Endocrinology", "abbrev": "Lancet Diabetes Endocrinol", "issn": "2213-8587", "pubmed": true, "society": "Elsevier"},
+    {"rank": 2, "name": "Diabetes Care", "abbrev": "Diabetes Care", "issn": "0149-5992", "pubmed": true, "society": "American Diabetes Association"},
+    {"rank": 3, "name": "Diabetes", "abbrev": "Diabetes", "issn": "0012-1797", "pubmed": true, "society": "ADA"},
+    {"rank": 4, "name": "Diabetologia", "abbrev": "Diabetologia", "issn": "0012-186X", "pubmed": true, "society": "EASD"},
+    {"rank": 5, "name": "Journal of Clinical Endocrinology & Metabolism", "abbrev": "J Clin Endocrinol Metab", "issn": "0021-972X", "pubmed": true, "society": "Endocrine Society"},
+    {"rank": 6, "name": "Thyroid", "abbrev": "Thyroid", "issn": "1050-7256", "pubmed": true, "society": "ATA"},
+    {"rank": 7, "name": "Endocrine Reviews", "abbrev": "Endocr Rev", "issn": "0163-769X", "pubmed": true, "society": "Endocrine Society"},
+    {"rank": 8, "name": "Indian Journal of Endocrinology and Metabolism", "abbrev": "Indian J Endocrinol Metab", "issn": "2230-8210", "pubmed": true, "society": "Endocrine Society of India"},
+    {"rank": 9, "name": "Journal of the Association of Physicians of India", "abbrev": "J Assoc Physicians India", "issn": "0004-5772", "pubmed": true, "society": "API"}
+  ],
+
+  "infectious_disease": [
+    {"rank": 1, "name": "Lancet Infectious Diseases", "abbrev": "Lancet Infect Dis", "issn": "1473-3099", "pubmed": true, "society": "Elsevier"},
+    {"rank": 2, "name": "Clinical Infectious Diseases", "abbrev": "Clin Infect Dis", "issn": "1058-4838", "pubmed": true, "society": "IDSA"},
+    {"rank": 3, "name": "Journal of Infectious Diseases", "abbrev": "J Infect Dis", "issn": "0022-1899", "pubmed": true, "society": "IDSA"},
+    {"rank": 4, "name": "JAMA Network Open (Infectious Disease)", "abbrev": "JAMA Netw Open", "issn": "2574-3805", "pubmed": true, "society": "AMA"},
+    {"rank": 5, "name": "Emerging Infectious Diseases", "abbrev": "Emerg Infect Dis", "issn": "1080-6040", "pubmed": true, "society": "CDC"},
+    {"rank": 6, "name": "Journal of Antimicrobial Chemotherapy", "abbrev": "J Antimicrob Chemother", "issn": "0305-7453", "pubmed": true, "society": "BSAC"},
+    {"rank": 7, "name": "International Journal of Antimicrobial Agents", "abbrev": "Int J Antimicrob Agents", "issn": "0924-8579", "pubmed": true, "society": null},
+    {"rank": 8, "name": "Indian Journal of Medical Microbiology", "abbrev": "Indian J Med Microbiol", "issn": "0255-0857", "pubmed": true, "society": "IAMM"},
+    {"rank": 9, "name": "Journal of Global Infectious Diseases", "abbrev": "J Glob Infect Dis", "issn": "0974-777X", "pubmed": true, "society": null}
+  ],
+
+  "gastroenterology": [
+    {"rank": 1, "name": "Gastroenterology", "abbrev": "Gastroenterology", "issn": "0016-5085", "pubmed": true, "society": "AGA"},
+    {"rank": 2, "name": "Gut", "abbrev": "Gut", "issn": "0017-5749", "pubmed": true, "society": "BSG/BMJ"},
+    {"rank": 3, "name": "Hepatology", "abbrev": "Hepatology", "issn": "0270-9139", "pubmed": true, "society": "AASLD"},
+    {"rank": 4, "name": "Lancet Gastroenterology & Hepatology", "abbrev": "Lancet Gastroenterol Hepatol", "issn": "2468-1253", "pubmed": true, "society": "Elsevier"},
+    {"rank": 5, "name": "American Journal of Gastroenterology", "abbrev": "Am J Gastroenterol", "issn": "0002-9270", "pubmed": true, "society": "ACG"},
+    {"rank": 6, "name": "Journal of Hepatology", "abbrev": "J Hepatol", "issn": "0168-8278", "pubmed": true, "society": "EASL"},
+    {"rank": 7, "name": "Gastrointestinal Endoscopy", "abbrev": "Gastrointest Endosc", "issn": "0016-5107", "pubmed": true, "society": "ASGE"},
+    {"rank": 8, "name": "Indian Journal of Gastroenterology", "abbrev": "Indian J Gastroenterol", "issn": "0254-8860", "pubmed": true, "society": "ISG"},
+    {"rank": 9, "name": "Tropical Gastroenterology", "abbrev": "Trop Gastroenterol", "issn": "0250-636X", "pubmed": false, "society": null}
+  ],
+
+  "nephrology": [
+    {"rank": 1, "name": "Journal of the American Society of Nephrology", "abbrev": "J Am Soc Nephrol", "issn": "1046-6673", "pubmed": true, "society": "ASN"},
+    {"rank": 2, "name": "Kidney International", "abbrev": "Kidney Int", "issn": "0085-2538", "pubmed": true, "society": "ISN"},
+    {"rank": 3, "name": "Clinical Journal of the American Society of Nephrology", "abbrev": "Clin J Am Soc Nephrol", "issn": "1555-9041", "pubmed": true, "society": "ASN"},
+    {"rank": 4, "name": "Nephrology Dialysis Transplantation", "abbrev": "Nephrol Dial Transplant", "issn": "0931-0509", "pubmed": true, "society": "ERA"},
+    {"rank": 5, "name": "Nature Reviews Nephrology", "abbrev": "Nat Rev Nephrol", "issn": "1759-5061", "pubmed": true, "society": "Nature"},
+    {"rank": 6, "name": "KDIGO Clinical Practice Guidelines", "abbrev": null, "issn": null, "pubmed": false, "society": "KDIGO"},
+    {"rank": 7, "name": "Indian Journal of Nephrology", "abbrev": "Indian J Nephrol", "issn": "0971-4065", "pubmed": true, "society": "ISN India"}
+  ],
+
+  "rheumatology": [
+    {"rank": 1, "name": "Annals of the Rheumatic Diseases", "abbrev": "Ann Rheum Dis", "issn": "0003-4967", "pubmed": true, "society": "EULAR/BMJ"},
+    {"rank": 2, "name": "Arthritis & Rheumatology", "abbrev": "Arthritis Rheumatol", "issn": "2326-5191", "pubmed": true, "society": "ACR"},
+    {"rank": 3, "name": "Lancet Rheumatology", "abbrev": "Lancet Rheumatol", "issn": "2665-9913", "pubmed": true, "society": "Elsevier"},
+    {"rank": 4, "name": "Rheumatology", "abbrev": "Rheumatology (Oxford)", "issn": "1462-0324", "pubmed": true, "society": "BSR/Oxford"},
+    {"rank": 5, "name": "Nature Reviews Rheumatology", "abbrev": "Nat Rev Rheumatol", "issn": "1759-4790", "pubmed": true, "society": "Nature"},
+    {"rank": 6, "name": "Journal of Rheumatology", "abbrev": "J Rheumatol", "issn": "0315-162X", "pubmed": true, "society": null},
+    {"rank": 7, "name": "Indian Journal of Rheumatology", "abbrev": "Indian J Rheumatol", "issn": "0973-3698", "pubmed": false, "society": "IRA"}
+  ],
+
+  "psychiatry": [
+    {"rank": 1, "name": "Lancet Psychiatry", "abbrev": "Lancet Psychiatry", "issn": "2215-0366", "pubmed": true, "society": "Elsevier"},
+    {"rank": 2, "name": "JAMA Psychiatry", "abbrev": "JAMA Psychiatry", "issn": "2168-622X", "pubmed": true, "society": "AMA"},
+    {"rank": 3, "name": "American Journal of Psychiatry", "abbrev": "Am J Psychiatry", "issn": "0002-953X", "pubmed": true, "society": "APA"},
+    {"rank": 4, "name": "Biological Psychiatry", "abbrev": "Biol Psychiatry", "issn": "0006-3223", "pubmed": true, "society": "SOBP"},
+    {"rank": 5, "name": "British Journal of Psychiatry", "abbrev": "Br J Psychiatry", "issn": "0007-1250", "pubmed": true, "society": "RCPsych"},
+    {"rank": 6, "name": "World Psychiatry", "abbrev": "World Psychiatry", "issn": "1723-8617", "pubmed": true, "society": "WPA"},
+    {"rank": 7, "name": "Psychological Medicine", "abbrev": "Psychol Med", "issn": "0033-2917", "pubmed": true, "society": "Cambridge"},
+    {"rank": 8, "name": "Indian Journal of Psychiatry", "abbrev": "Indian J Psychiatry", "issn": "0019-5545", "pubmed": true, "society": "IPS"}
+  ],
+
+  "pediatrics": [
+    {"rank": 1, "name": "Pediatrics", "abbrev": "Pediatrics", "issn": "0031-4005", "pubmed": true, "society": "American Academy of Pediatrics"},
+    {"rank": 2, "name": "JAMA Pediatrics", "abbrev": "JAMA Pediatr", "issn": "2168-6203", "pubmed": true, "society": "AMA"},
+    {"rank": 3, "name": "Lancet Child & Adolescent Health", "abbrev": "Lancet Child Adolesc Health", "issn": "2352-4642", "pubmed": true, "society": "Elsevier"},
+    {"rank": 4, "name": "Archives of Disease in Childhood", "abbrev": "Arch Dis Child", "issn": "0003-9888", "pubmed": true, "society": "BMJ/RCPCH"},
+    {"rank": 5, "name": "Journal of Pediatrics", "abbrev": "J Pediatr", "issn": "0022-3476", "pubmed": true, "society": null},
+    {"rank": 6, "name": "Neonatology", "abbrev": "Neonatology", "issn": "1661-7800", "pubmed": true, "society": null},
+    {"rank": 7, "name": "Indian Pediatrics", "abbrev": "Indian Pediatr", "issn": "0019-6061", "pubmed": true, "society": "Indian Academy of Pediatrics"},
+    {"rank": 8, "name": "Indian Journal of Pediatrics", "abbrev": "Indian J Pediatr", "issn": "0019-5456", "pubmed": true, "society": null}
+  ],
+
+  "surgery": [
+    {"rank": 1, "name": "Annals of Surgery", "abbrev": "Ann Surg", "issn": "0003-4932", "pubmed": true, "society": null},
+    {"rank": 2, "name": "JAMA Surgery", "abbrev": "JAMA Surg", "issn": "2168-6254", "pubmed": true, "society": "AMA"},
+    {"rank": 3, "name": "British Journal of Surgery", "abbrev": "Br J Surg", "issn": "0007-1323", "pubmed": true, "society": "BJS Society"},
+    {"rank": 4, "name": "Lancet Surgery (in Lancet)", "abbrev": "Lancet", "issn": "0140-6736", "pubmed": true, "society": "Elsevier"},
+    {"rank": 5, "name": "Surgery", "abbrev": "Surgery", "issn": "0039-6060", "pubmed": true, "society": null},
+    {"rank": 6, "name": "Journal of the American College of Surgeons", "abbrev": "J Am Coll Surg", "issn": "1072-7515", "pubmed": true, "society": "ACS"},
+    {"rank": 7, "name": "World Journal of Surgery", "abbrev": "World J Surg", "issn": "0364-2313", "pubmed": true, "society": "ISS"},
+    {"rank": 8, "name": "Indian Journal of Surgery", "abbrev": "Indian J Surg", "issn": "0972-2068", "pubmed": true, "society": "ASI"}
+  ],
+
+  "orthopedics": [
+    {"rank": 1, "name": "Journal of Bone and Joint Surgery (American)", "abbrev": "J Bone Joint Surg Am", "issn": "0021-9355", "pubmed": true, "society": null},
+    {"rank": 2, "name": "Journal of Bone and Joint Surgery (British)", "abbrev": "Bone Joint J", "issn": "2049-4394", "pubmed": true, "society": "BOA"},
+    {"rank": 3, "name": "Clinical Orthopaedics and Related Research", "abbrev": "Clin Orthop Relat Res", "issn": "0009-921X", "pubmed": true, "society": "AAOS"},
+    {"rank": 4, "name": "Arthroscopy", "abbrev": "Arthroscopy", "issn": "0749-8063", "pubmed": true, "society": "AANA"},
+    {"rank": 5, "name": "Spine", "abbrev": "Spine (Phila Pa 1976)", "issn": "0362-2436", "pubmed": true, "society": null},
+    {"rank": 6, "name": "Journal of Orthopaedic Trauma", "abbrev": "J Orthop Trauma", "issn": "0890-5339", "pubmed": true, "society": "OTA"},
+    {"rank": 7, "name": "Indian Journal of Orthopaedics", "abbrev": "Indian J Orthop", "issn": "0019-5413", "pubmed": true, "society": "IOA"}
+  ],
+
+  "obstetrics_gynecology": [
+    {"rank": 1, "name": "Obstetrics & Gynecology (Green Journal)", "abbrev": "Obstet Gynecol", "issn": "0029-7844", "pubmed": true, "society": "ACOG"},
+    {"rank": 2, "name": "American Journal of Obstetrics and Gynecology", "abbrev": "Am J Obstet Gynecol", "issn": "0002-9378", "pubmed": true, "society": null},
+    {"rank": 3, "name": "BJOG", "abbrev": "BJOG", "issn": "1470-0328", "pubmed": true, "society": "RCOG"},
+    {"rank": 4, "name": "Human Reproduction", "abbrev": "Hum Reprod", "issn": "0268-1161", "pubmed": true, "society": "ESHRE"},
+    {"rank": 5, "name": "Fertility and Sterility", "abbrev": "Fertil Steril", "issn": "0015-0282", "pubmed": true, "society": "ASRM"},
+    {"rank": 6, "name": "Gynecologic Oncology", "abbrev": "Gynecol Oncol", "issn": "0090-8258", "pubmed": true, "society": "SGO"},
+    {"rank": 7, "name": "Journal of Obstetrics and Gynaecology of India", "abbrev": "J Obstet Gynaecol India", "issn": "0971-9202", "pubmed": true, "society": "FOGSI"}
+  ],
+
+  "dermatology": [
+    {"rank": 1, "name": "Journal of the American Academy of Dermatology", "abbrev": "J Am Acad Dermatol", "issn": "0190-9622", "pubmed": true, "society": "AAD"},
+    {"rank": 2, "name": "JAMA Dermatology", "abbrev": "JAMA Dermatol", "issn": "2168-6068", "pubmed": true, "society": "AMA"},
+    {"rank": 3, "name": "British Journal of Dermatology", "abbrev": "Br J Dermatol", "issn": "0007-0963", "pubmed": true, "society": "BAD"},
+    {"rank": 4, "name": "Journal of Investigative Dermatology", "abbrev": "J Invest Dermatol", "issn": "0022-202X", "pubmed": true, "society": "SID"},
+    {"rank": 5, "name": "Dermatologic Surgery", "abbrev": "Dermatol Surg", "issn": "1076-0512", "pubmed": true, "society": "ASDS"},
+    {"rank": 6, "name": "Indian Journal of Dermatology Venereology and Leprology", "abbrev": "Indian J Dermatol Venereol Leprol", "issn": "0378-6323", "pubmed": true, "society": "IADVL"},
+    {"rank": 7, "name": "Indian Dermatology Online Journal", "abbrev": "Indian Dermatol Online J", "issn": "2229-5178", "pubmed": true, "society": null}
+  ],
+
+  "ophthalmology": [
+    {"rank": 1, "name": "Ophthalmology", "abbrev": "Ophthalmology", "issn": "0161-6420", "pubmed": true, "society": "AAO"},
+    {"rank": 2, "name": "JAMA Ophthalmology", "abbrev": "JAMA Ophthalmol", "issn": "2168-6165", "pubmed": true, "society": "AMA"},
+    {"rank": 3, "name": "American Journal of Ophthalmology", "abbrev": "Am J Ophthalmol", "issn": "0002-9394", "pubmed": true, "society": null},
+    {"rank": 4, "name": "British Journal of Ophthalmology", "abbrev": "Br J Ophthalmol", "issn": "0007-1161", "pubmed": true, "society": "RCOphth"},
+    {"rank": 5, "name": "Investigative Ophthalmology & Visual Science", "abbrev": "Invest Ophthalmol Vis Sci", "issn": "0146-0404", "pubmed": true, "society": "ARVO"},
+    {"rank": 6, "name": "Indian Journal of Ophthalmology", "abbrev": "Indian J Ophthalmol", "issn": "0301-4738", "pubmed": true, "society": "AIOS"}
+  ],
+
+  "emergency_medicine": [
+    {"rank": 1, "name": "Annals of Emergency Medicine", "abbrev": "Ann Emerg Med", "issn": "0196-0644", "pubmed": true, "society": "ACEP"},
+    {"rank": 2, "name": "Emergency Medicine Journal", "abbrev": "Emerg Med J", "issn": "1472-0205", "pubmed": true, "society": "RCEM/BMJ"},
+    {"rank": 3, "name": "Academic Emergency Medicine", "abbrev": "Acad Emerg Med", "issn": "1069-6563", "pubmed": true, "society": "SAEM"},
+    {"rank": 4, "name": "Resuscitation", "abbrev": "Resuscitation", "issn": "0300-9572", "pubmed": true, "society": "ERC"},
+    {"rank": 5, "name": "Journal of Emergency Medicine", "abbrev": "J Emerg Med", "issn": "0736-4679", "pubmed": true, "society": null},
+    {"rank": 6, "name": "Journal of Emergencies Trauma and Shock", "abbrev": "J Emerg Trauma Shock", "issn": "0974-2700", "pubmed": true, "society": "INDUSEM"}
+  ],
+
+  "critical_care": [
+    {"rank": 1, "name": "Intensive Care Medicine", "abbrev": "Intensive Care Med", "issn": "0342-4642", "pubmed": true, "society": "ESICM"},
+    {"rank": 2, "name": "Critical Care Medicine", "abbrev": "Crit Care Med", "issn": "0090-3493", "pubmed": true, "society": "SCCM"},
+    {"rank": 3, "name": "Critical Care", "abbrev": "Crit Care", "issn": "1364-8535", "pubmed": true, "society": null},
+    {"rank": 4, "name": "American Journal of Respiratory and Critical Care Medicine", "abbrev": "Am J Respir Crit Care Med", "issn": "1073-449X", "pubmed": true, "society": "ATS"},
+    {"rank": 5, "name": "CHEST", "abbrev": "Chest", "issn": "0012-3692", "pubmed": true, "society": "ACCP"},
+    {"rank": 6, "name": "Indian Journal of Critical Care Medicine", "abbrev": "Indian J Crit Care Med", "issn": "0972-5229", "pubmed": true, "society": "ISCCM"}
+  ],
+
+  "pharmacology": [
+    {"rank": 1, "name": "Clinical Pharmacology & Therapeutics", "abbrev": "Clin Pharmacol Ther", "issn": "0009-9236", "pubmed": true, "society": "ASCPT"},
+    {"rank": 2, "name": "British Journal of Clinical Pharmacology", "abbrev": "Br J Clin Pharmacol", "issn": "0306-5251", "pubmed": true, "society": "BPS"},
+    {"rank": 3, "name": "Pharmacological Reviews", "abbrev": "Pharmacol Rev", "issn": "0031-6997", "pubmed": true, "society": "ASPET"},
+    {"rank": 4, "name": "Drug Safety", "abbrev": "Drug Saf", "issn": "0114-5916", "pubmed": true, "society": null},
+    {"rank": 5, "name": "Clinical Pharmacokinetics", "abbrev": "Clin Pharmacokinet", "issn": "0312-5963", "pubmed": true, "society": null},
+    {"rank": 6, "name": "European Journal of Clinical Pharmacology", "abbrev": "Eur J Clin Pharmacol", "issn": "0031-6970", "pubmed": true, "society": null},
+    {"rank": 7, "name": "Indian Journal of Pharmacology", "abbrev": "Indian J Pharmacol", "issn": "0253-7613", "pubmed": true, "society": "IPS"}
+  ],
+
+  "radiology": [
+    {"rank": 1, "name": "Radiology", "abbrev": "Radiology", "issn": "0033-8419", "pubmed": true, "society": "RSNA"},
+    {"rank": 2, "name": "European Radiology", "abbrev": "Eur Radiol", "issn": "0938-7994", "pubmed": true, "society": "ESR"},
+    {"rank": 3, "name": "American Journal of Roentgenology", "abbrev": "AJR Am J Roentgenol", "issn": "0361-803X", "pubmed": true, "society": "ARRS"},
+    {"rank": 4, "name": "Journal of Nuclear Medicine", "abbrev": "J Nucl Med", "issn": "0161-5505", "pubmed": true, "society": "SNMMI"},
+    {"rank": 5, "name": "Clinical Radiology", "abbrev": "Clin Radiol", "issn": "0009-9260", "pubmed": true, "society": "RCR"},
+    {"rank": 6, "name": "Indian Journal of Radiology and Imaging", "abbrev": "Indian J Radiol Imaging", "issn": "0971-3026", "pubmed": true, "society": "IRIA"}
+  ],
+
+  "anesthesiology": [
+    {"rank": 1, "name": "Anesthesiology", "abbrev": "Anesthesiology", "issn": "0003-3022", "pubmed": true, "society": "ASA"},
+    {"rank": 2, "name": "British Journal of Anaesthesia", "abbrev": "Br J Anaesth", "issn": "0007-0912", "pubmed": true, "society": "RCoA"},
+    {"rank": 3, "name": "Anesthesia & Analgesia", "abbrev": "Anesth Analg", "issn": "0003-2999", "pubmed": true, "society": "IARS"},
+    {"rank": 4, "name": "Regional Anesthesia and Pain Medicine", "abbrev": "Reg Anesth Pain Med", "issn": "1098-7339", "pubmed": true, "society": "ASRA"},
+    {"rank": 5, "name": "Pain", "abbrev": "Pain", "issn": "0304-3959", "pubmed": true, "society": "IASP"},
+    {"rank": 6, "name": "Indian Journal of Anaesthesia", "abbrev": "Indian J Anaesth", "issn": "0019-5049", "pubmed": true, "society": "ISA"}
+  ],
+
+  "pathology": [
+    {"rank": 1, "name": "American Journal of Surgical Pathology", "abbrev": "Am J Surg Pathol", "issn": "0147-5185", "pubmed": true, "society": null},
+    {"rank": 2, "name": "Modern Pathology", "abbrev": "Mod Pathol", "issn": "0893-3952", "pubmed": true, "society": "USCAP"},
+    {"rank": 3, "name": "Journal of Pathology", "abbrev": "J Pathol", "issn": "0022-3417", "pubmed": true, "society": "Pathological Society of GB/Ireland"},
+    {"rank": 4, "name": "Histopathology", "abbrev": "Histopathology", "issn": "0309-0167", "pubmed": true, "society": null},
+    {"rank": 5, "name": "Indian Journal of Pathology and Microbiology", "abbrev": "Indian J Pathol Microbiol", "issn": "0377-4929", "pubmed": true, "society": "IAPM"}
+  ],
+
+  "hematology": [
+    {"rank": 1, "name": "Blood", "abbrev": "Blood", "issn": "0006-4971", "pubmed": true, "society": "ASH"},
+    {"rank": 2, "name": "Journal of Clinical Oncology (Hematology)", "abbrev": "J Clin Oncol", "issn": "0732-183X", "pubmed": true, "society": "ASCO"},
+    {"rank": 3, "name": "Lancet Haematology", "abbrev": "Lancet Haematol", "issn": "2352-3026", "pubmed": true, "society": "Elsevier"},
+    {"rank": 4, "name": "Haematologica", "abbrev": "Haematologica", "issn": "0390-6078", "pubmed": true, "society": "EHA"},
+    {"rank": 5, "name": "British Journal of Haematology", "abbrev": "Br J Haematol", "issn": "0007-1048", "pubmed": true, "society": "BSH"},
+    {"rank": 6, "name": "American Journal of Hematology", "abbrev": "Am J Hematol", "issn": "0361-8609", "pubmed": true, "society": null},
+    {"rank": 7, "name": "Indian Journal of Hematology and Blood Transfusion", "abbrev": "Indian J Hematol Blood Transfus", "issn": "0971-4502", "pubmed": true, "society": "ISHBT"}
+  ],
+
+  "urology": [
+    {"rank": 1, "name": "European Urology", "abbrev": "Eur Urol", "issn": "0302-2838", "pubmed": true, "society": "EAU"},
+    {"rank": 2, "name": "Journal of Urology", "abbrev": "J Urol", "issn": "0022-5347", "pubmed": true, "society": "AUA"},
+    {"rank": 3, "name": "BJU International", "abbrev": "BJU Int", "issn": "1464-4096", "pubmed": true, "society": "BAUS"},
+    {"rank": 4, "name": "Urology", "abbrev": "Urology", "issn": "0090-4295", "pubmed": true, "society": null},
+    {"rank": 5, "name": "Nature Reviews Urology", "abbrev": "Nat Rev Urol", "issn": "1759-4812", "pubmed": true, "society": "Nature"},
+    {"rank": 6, "name": "Indian Journal of Urology", "abbrev": "Indian J Urol", "issn": "0970-1591", "pubmed": true, "society": "USI"}
+  ],
+
+  "evidence_synthesis": [
+    {"rank": 1, "name": "Cochrane Database of Systematic Reviews", "abbrev": "Cochrane Database Syst Rev", "issn": "1469-493X", "pubmed": true, "society": "Cochrane"},
+    {"rank": 2, "name": "BMJ Evidence-Based Medicine", "abbrev": "BMJ Evid Based Med", "issn": "2515-446X", "pubmed": true, "society": "BMJ"},
+    {"rank": 3, "name": "Systematic Reviews", "abbrev": "Syst Rev", "issn": "2046-4053", "pubmed": true, "society": null},
+    {"rank": 4, "name": "Journal of Evidence-Based Medicine", "abbrev": "J Evid Based Med", "issn": "1756-5383", "pubmed": true, "society": null},
+    {"rank": 5, "name": "Campbell Systematic Reviews", "abbrev": "Campbell Syst Rev", "issn": "1891-1803", "pubmed": false, "society": "Campbell Collaboration"}
+  ],
+
+  "public_health_epidemiology": [
+    {"rank": 1, "name": "Lancet Global Health", "abbrev": "Lancet Glob Health", "issn": "2214-109X", "pubmed": true, "society": "Elsevier"},
+    {"rank": 2, "name": "Lancet Public Health", "abbrev": "Lancet Public Health", "issn": "2468-2667", "pubmed": true, "society": "Elsevier"},
+    {"rank": 3, "name": "American Journal of Epidemiology", "abbrev": "Am J Epidemiol", "issn": "0002-9262", "pubmed": true, "society": "SER"},
+    {"rank": 4, "name": "International Journal of Epidemiology", "abbrev": "Int J Epidemiol", "issn": "0300-5771", "pubmed": true, "society": "IEA"},
+    {"rank": 5, "name": "Bulletin of the World Health Organization", "abbrev": "Bull World Health Organ", "issn": "0042-9686", "pubmed": true, "society": "WHO"},
+    {"rank": 6, "name": "Indian Journal of Public Health", "abbrev": "Indian J Public Health", "issn": "0019-557X", "pubmed": true, "society": "IPHA"},
+    {"rank": 7, "name": "Indian Journal of Community Medicine", "abbrev": "Indian J Community Med", "issn": "0970-0218", "pubmed": true, "society": "IAPSM"}
+  ],
+
+  "tropical_medicine": [
+    {"rank": 1, "name": "PLOS Neglected Tropical Diseases", "abbrev": "PLoS Negl Trop Dis", "issn": "1935-2735", "pubmed": true, "society": "PLOS"},
+    {"rank": 2, "name": "Transactions of the Royal Society of Tropical Medicine and Hygiene", "abbrev": "Trans R Soc Trop Med Hyg", "issn": "0035-9203", "pubmed": true, "society": "RSTMH"},
+    {"rank": 3, "name": "American Journal of Tropical Medicine and Hygiene", "abbrev": "Am J Trop Med Hyg", "issn": "0002-9637", "pubmed": true, "society": "ASTMH"},
+    {"rank": 4, "name": "Malaria Journal", "abbrev": "Malar J", "issn": "1475-2875", "pubmed": true, "society": null},
+    {"rank": 5, "name": "Indian Journal of Medical Research", "abbrev": "Indian J Med Res", "issn": "0971-5916", "pubmed": true, "society": "ICMR"},
+    {"rank": 6, "name": "National Medical Journal of India", "abbrev": "Natl Med J India", "issn": "0970-258X", "pubmed": true, "society": "AIIMS"}
+  ]
+}
