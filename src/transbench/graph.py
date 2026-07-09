@@ -147,11 +147,20 @@ async def _retrieve_and_grade_node(state: TransBenchState) -> TransBenchState:
         # rank_article_list actually returned, not a hand-picked field
         # subset) so a later `TransRequest.retrieval_snapshot` replay
         # (agents._replay_from_snapshot) has everything it needs to
-        # reconstruct a real ArticleRegistry and re-grade offline.
+        # reconstruct a real ArticleRegistry and re-grade offline. "statement"
+        # (post-release addition) records the EXACT hypothesis statement this
+        # entry was captured for -- agents.run_retrieve's STATEMENT-match
+        # safety guard reads this back on a later replay attempt (e.g. a
+        # bundled TRANSBENCH_MODE=snapshot file) to refuse replaying this
+        # entry against a differently-worded hypothesis that merely happens
+        # to reuse the same id (agent 2 assigns ids positionally -- "h1" on
+        # one run and "h1" on a later run are NOT guaranteed to be the same
+        # hypothesis).
         manifest_entry = {
             "neutral_query": retrieval.neutral_query,
             "pubmed_query": retrieval.pubmed_query,
             "abstracts": retrieval.ranked,
+            "statement": hypothesis.statement,
         }
         return hypothesis.id, evidence, manifest_entry, retrieval.registry
 

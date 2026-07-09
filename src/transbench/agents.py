@@ -885,15 +885,31 @@ def _entity_pubmed_query(
     return " ".join(terms)
 
 
+_STATEMENT_MATCH_RE = re.compile(r"\s+")
+
+
+def _normalize_statement(text: str) -> str:
+    """strip/lower/collapse-internal-whitespace normalization used ONLY to
+    compare a snapshot entry's stored ``"statement"`` against the CURRENT
+    hypothesis's ``statement`` before ever replaying evidence for it (see
+    :func:`run_retrieve`'s ``retrieval_snapshot`` STATEMENT-match safety
+    guard) — never used for anything citation/grading-related."""
+    return _STATEMENT_MATCH_RE.sub(" ", (text or "").strip().lower())
+
+
 def _replay_from_snapshot(hypothesis_id: str, snapshot_entry: dict) -> RetrievalResult:
     """Snapshot REPLAY (BUILD_SPEC.md §9): a pure, fully OFFLINE, zero
     -network reconstruction of a prior :func:`run_retrieve` call's
     ``RetrievalResult`` from a previously-captured
     ``run_manifest["retrieval_snapshot"][hypothesis_id]`` entry (shape:
-    ``{"neutral_query": str, "pubmed_query": str, "abstracts": list[dict]}``
-    — exactly what ``graph.py``'s ``_retrieve_and_grade_node`` writes there
-    on a live run). Never calls ``neutralize_query`` or
-    ``fetch_evidence_data``.
+    ``{"neutral_query": str, "pubmed_query": str, "abstracts": list[dict],
+    "statement": str}`` — exactly what ``graph.py``'s
+    ``_retrieve_and_grade_node`` writes there on a live run; ``"statement"``
+    is optional/absent on snapshots captured before the post-release
+    STATEMENT-match safety guard was added, and is otherwise checked by the
+    CALLER, :func:`run_retrieve`, before this function is ever invoked — this
+    function itself does not read or care about that key). Never calls
+    ``neutralize_query`` or ``fetch_evidence_data``.
 
     Rebuilds a REAL, fully-functional ``ArticleRegistry`` from the
     snapshot's own raw abstract dicts via the SAME reused
@@ -973,6 +989,23 @@ async def run_retrieve(
     captured on a prior run legitimately may not cover a freshly-generated
     hypothesis id on a later run; that is not an error).
 
+    STATEMENT-match safety guard (post-release addition, feeds
+    ``TRANSBENCH_MODE=snapshot`` in ``engine.py`` as well as any direct
+    ``retrieval_snapshot`` caller): an id match ALONE is not sufficient to
+    prove a snapshot entry was actually captured for THIS hypothesis — a
+    fresh ``run_transbench`` call regenerates hypothesis ids independently
+    each run (agent 2 assigns ``h1``/``h2``/``h3`` positionally), so id
+    collision between an unrelated snapshot and today's differently-worded
+    hypothesis is entirely possible. When a matched entry ALSO carries a
+    non-empty ``"statement"`` key, it is replayed ONLY if
+    ``_normalize_statement(entry["statement"]) ==
+    _normalize_statement(hypothesis.statement)`` — a mismatch is logged and
+    falls through to LIVE retrieval for that one hypothesis (never an
+    error, never a crash; every other hypothesis in the same run is
+    unaffected). An entry with NO ``"statement"`` key at all (every snapshot
+    captured before this guard existed) keeps the original, unconditional
+    id-only-keyed replay behavior — fully backward compatible.
+
     Implements the corrected §3 flow, with one empirically-forced query-
     construction fix (see below):
       1. ``neutralize_query(hypothesis.statement, MODEL_CHEAP, user_key,
@@ -1044,7 +1077,20 @@ async def run_retrieve(
     """
     snapshot_entry = (retrieval_snapshot or {}).get(hypothesis.id)
     if snapshot_entry is not None:
-        return _replay_from_snapshot(hypothesis.id, snapshot_entry)
+        snapshot_statement = snapshot_entry.get("statement")
+        if not snapshot_statement or _normalize_statement(snapshot_statement) == _normalize_statement(
+            hypothesis.statement
+        ):
+            return _replay_from_snapshot(hypothesis.id, snapshot_entry)
+        logger.warning(
+            "run_retrieve: snapshot entry for hypothesis id %s carries a DIFFERENT statement "
+            "than the CURRENT hypothesis (safety guard against replaying evidence captured for "
+            "a different hypothesis) -- falling back to LIVE retrieval for this hypothesis only. "
+            "snapshot_statement=%r current_statement=%r",
+            hypothesis.id,
+            snapshot_statement,
+            hypothesis.statement,
+        )
 
     stance = await neutralize_query(
         hypothesis.statement, model_id or config.MODEL_CHEAP, user_key, user_provider

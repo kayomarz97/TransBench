@@ -31,6 +31,14 @@ from dotenv import load_dotenv
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_REPO_ROOT / ".env", override=True)
 
+# Public alias (post-release addition): other modules that need to resolve a
+# repo-root-relative path (e.g. engine.py's TRANSBENCH_MODE=golden/snapshot
+# bundled-file lookups, config.py's own `snapshots/` directory) can import
+# this instead of duplicating the ``Path(__file__).resolve().parents[2]``
+# computation above. Purely additive -- ``_REPO_ROOT`` itself is unchanged
+# and still used as-is by the ``load_dotenv`` call above.
+REPO_ROOT: Path = _REPO_ROOT
+
 # ---------------------------------------------------------------------------
 # Force deterministic LLM clients through the reused Iatronix ``create_llm()``
 # factory. ``create_llm`` has no ``temperature`` kwarg of its own — it builds

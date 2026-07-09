@@ -1,0 +1,921 @@
+{
+  "request_echo": "58F, resistant hypertension despite ACEi + CCB + thiazide at max dose; elevated hs-CRP; poor response to RAAS blockade.",
+  "axes": [
+    {
+      "axis": "raas",
+      "rationale": "Explicit poor response to RAAS blockade despite ACEi at maximum dose indicates potential RAAS pathway dysfunction or inadequate suppression; suggests need to evaluate aldosterone breakthrough, renin escape, or alternative RAAS mechanisms",
+      "key_entities": [
+        "ACE inhibitor (max dose)",
+        "aldosterone breakthrough",
+        "renin escape",
+        "secondary hyperaldosteronism"
+      ]
+    },
+    {
+      "axis": "immune_inflammatory",
+      "rationale": "Elevated hs-CRP indicates systemic inflammation as a potential driver of resistant hypertension; inflammatory pathways may contribute to endothelial dysfunction and vascular stiffness independent of RAAS",
+      "key_entities": [
+        "high-sensitivity CRP",
+        "systemic inflammation",
+        "inflammatory hypertension",
+        "immune activation"
+      ]
+    },
+    {
+      "axis": "endothelial_vascular",
+      "rationale": "Resistant hypertension with elevated inflammatory markers suggests endothelial dysfunction and vascular stiffness as underlying mechanisms; poor RAAS response may reflect structural/functional vascular pathology",
+      "key_entities": [
+        "endothelial dysfunction",
+        "arterial stiffness",
+        "vascular remodeling",
+        "nitric oxide bioavailability"
+      ]
+    },
+    {
+      "axis": "renal_volume",
+      "rationale": "Thiazide diuretic at max dose with persistent hypertension raises concern for volume-resistant hypertension; may indicate renal sodium retention mechanisms or primary renal pathology",
+      "key_entities": [
+        "thiazide diuretic (max dose)",
+        "sodium retention",
+        "volume expansion",
+        "renal function assessment"
+      ]
+    },
+    {
+      "axis": "genetic_pharmacogenomic",
+      "rationale": "Poor response to standard triple therapy (ACEi/CCB/thiazide) despite maximum dosing suggests possible pharmacogenomic factors affecting drug metabolism or target responsiveness",
+      "key_entities": [
+        "ACE I/D polymorphism",
+        "CYP3A4 variants",
+        "drug transporter polymorphisms",
+        "treatment response phenotype"
+      ]
+    }
+  ],
+  "hypotheses": [
+    {
+      "hypothesis": {
+        "id": "H1",
+        "axis": "renal_volume",
+        "statement": "Aldosterone breakthrough via non-ACE-dependent chymase-mediated angiotensin II generation in renal tubular cells drives persistent mineralocorticoid receptor activation, causing thiazide-refractory sodium retention independent of ACE inhibition. This mechanism is amplified in post-menopausal women (reduced estrogen-mediated suppression of chymase expression) and in individuals with CKD-associated tubular hypertrophy.",
+        "prediction": "Plasma aldosterone-to-renin ratio will remain elevated (>30 ng/dL per ng/mL/hr) despite maximum ACEi dosing; urinary aldosterone excretion will not fall proportionally to plasma ACE activity; renal biopsy or urinary chymase activity assay will show elevated chymase in tubular epithelium; adding a mineralocorticoid receptor antagonist (spironolactone) will reduce 24-hour urinary sodium excretion by >40 mEq/day and lower systolic BP >15 mmHg, whereas continuing ACEi dose escalation will not.",
+        "rationale": "ACE inhibitors block only one of at least two enzymatic routes to angiotensin II; mast-cell and tubular chymase can generate Ang II independently. Post-menopausal estrogen loss removes a known suppressor of chymase transcription. Elevated hs-CRP suggests mast-cell degranulation and inflammatory microenvironment in the kidney, which would further upregulate chymase. This is a genuinely open mechanistic question because chymase contribution to human renal Ang II generation in vivo is not quantified in clinical practice, and the interaction with menopausal status is uncharacterized at the pathway level.",
+        "priority": "high"
+      },
+      "evidence": [
+        {
+          "claim_fragment": "To show that the frequency of aldosterone breakthrough is lower when RAS blockers are given at bedtime compared to on awaking, and to analyze the determinants and consequences of aldosterone breakthrough.",
+          "reference": {
+            "source": "clinicaltrials.gov",
+            "title": "RAS Blockade at Bedtime Versus on Awakening for Aldosterone Breakthrough",
+            "year": null,
+            "url": "https://clinicaltrials.gov/study/NCT01805362",
+            "pmid": null,
+            "grade": "rct"
+          },
+          "supports": true,
+          "entailment": "unclear",
+          "grade": "rct"
+        }
+      ],
+      "supporting_count": 0,
+      "contradicting_count": 0,
+      "novelty": "open_question",
+      "novelty_reason": "The core phenomenon of aldosterone breakthrough via chymase-mediated angiotensin II generation escaping ACE inhibition is documented in cardiac and vascular tissue, and chymase expression in renal tubular cells has some experimental support, but the specific mechanistic synthesis presented here\u2014renal tubular chymase as the primary driver of thiazide-refractory sodium retention, amplified by post-menopausal estrogen loss and CKD-associated tubular hypertrophy\u2014has not been rigorously established as an integrated clinical entity. The evidence provided (a single RCT of unclear relevance regarding dosing timing of RAS blockers and aldosterone breakthrough) is tangential and insufficient to classify this as 'established.' The hypothesis is mechanistically plausible and partially grounded in known biology (chymase, aldosterone escape, MR activation), but the specific renal tubular localization, the sex-hormone modulation of chymase expression in this context, and the CKD-tubular hypertrophy amplification remain unresolved and understudied, making this a legitimate open question worthy of investigation rather than either confirmed or wholly unsupported.",
+      "confidence": "low",
+      "grounded": false
+    },
+    {
+      "hypothesis": {
+        "id": "H2",
+        "axis": "immune_inflammatory",
+        "statement": "Clonally expanded CD8+ effector-memory T cells infiltrating the perivascular adventitia produce IFN-\u03b3 and IL-17A, which transcriptionally suppress endothelial nitric oxide synthase (eNOS) via STAT1-mediated promoter methylation and simultaneously upregulate NADPH oxidase (NOX2) in vascular smooth muscle, creating a self-sustaining oxidative-inflammatory loop that maintains elevated vascular resistance independently of RAAS activity.",
+        "prediction": "Peripheral blood immunophenotyping will show an elevated CD8+ effector-memory (CD45RA\u2212CCR7\u2212) to na\u00efve T-cell ratio compared to age-sex-matched normotensive controls; plasma IFN-\u03b3 and IL-17A will be elevated; ex vivo stimulation of patient PBMCs will produce greater IFN-\u03b3 secretion per cell than controls; aortic pulse-wave velocity (a surrogate for vascular stiffness) will correlate positively with CD8+ effector-memory cell count (r > 0.5 in a cohort study); methylation-specific PCR of circulating endothelial cells will show hypermethylation of the eNOS promoter CpG island relative to normotensive controls; and selective depletion or blockade of IFN-\u03b3 signaling in a humanized mouse model of this phenotype will reduce vascular NOX2 expression and restore NO bioavailability.",
+        "rationale": "Elevated hs-CRP in resistant hypertension is often attributed generically to inflammation, but the specific effector arm is rarely specified. CD8+ T-cell-mediated vascular inflammation has been demonstrated in animal models of Ang II-induced hypertension, yet the human in vivo evidence for eNOS promoter methylation downstream of IFN-\u03b3/STAT1 as a durable, drug-resistant mechanism is an open question. This would explain why RAAS blockade and CCB fail: the primary lesion is transcriptional suppression of vasodilatory capacity, not excess vasoconstrictor signaling. Population modifier: post-menopausal women have higher Th1/Th17 skewing relative to pre-menopausal women, potentially amplifying this axis.",
+        "priority": "high"
+      },
+      "evidence": [],
+      "supporting_count": 0,
+      "contradicting_count": 0,
+      "novelty": "open_question",
+      "novelty_reason": "The hypothesis integrates several individually plausible but incompletely connected mechanisms: CD8+ effector-memory T cell involvement in hypertension has partial support (Guzik et al. and related work show T cells, including CD8+, contribute to experimental hypertension), IFN-\u03b3 and IL-17A roles in vascular dysfunction are documented, and eNOS suppression and NOX2 upregulation in hypertension are established. However, the specific mechanistic chain\u2014clonally expanded perivascular CD8+ TEM cells driving STAT1-mediated eNOS promoter methylation while simultaneously upregulating vascular NOX2 to create a RAAS-independent self-sustaining loop\u2014has not been established as a unified, documented pathway. The STAT1-mediated epigenetic (methylation) suppression of eNOS specifically by CD8+ T cell-derived cytokines, the clonal expansion angle in the adventitia, and the explicit RAAS independence are novel integrations that remain unresolved. The predictions are testable with existing technologies. This makes it a well-constructed open question rather than an established finding or an unsupported speculation.",
+      "confidence": "low",
+      "grounded": false
+    },
+    {
+      "hypothesis": {
+        "id": "H3",
+        "axis": "genetic_pharmacogenomic",
+        "statement": "A loss-of-function variant in SLC12A3 (encoding the thiazide-sensitive NCC cotransporter) paradoxically causes compensatory upregulation of the epithelial sodium channel (ENaC) via aldosterone-independent WNK1/SPAK kinase pathway activation, such that thiazide occupancy of NCC triggers a homeostatic rebound that fully restores sodium reabsorption through ENaC, rendering the diuretic component of triple therapy ineffective and maintaining volume-dependent hypertension.",
+        "prediction": "Whole-exome sequencing will identify a heterozygous hypomorphic SLC12A3 variant (minor allele frequency <2%) in this patient; urinary sodium excretion will not increase acutely (within 6 hours) after a supervised thiazide dose challenge compared to wild-type controls; urinary ENaC activity (estimated by lithium clearance ratio or amiloride-sensitive natriuresis) will be disproportionately elevated relative to plasma aldosterone; phospho-SPAK levels in urinary exosomes will be elevated at baseline; and adding amiloride (ENaC blocker) will produce a natriuretic response exceeding that of continued thiazide, with a predicted systolic BP reduction >12 mmHg that is not seen with thiazide dose escalation.",
+        "rationale": "SLC12A3 variants are known to cause Gitelman syndrome at homozygous loss-of-function, but heterozygous hypomorphic states create a nuanced phenotype where partial NCC dysfunction activates WNK-SPAK signaling as a compensatory mechanism, potentially upregulating ENaC beyond baseline. This is an open mechanistic question because the net blood pressure effect of heterozygous SLC12A3 variants in the context of triple antihypertensive therapy has not been characterized, and the WNK1/SPAK-ENaC compensatory axis in humans under pharmacological NCC blockade is not well-defined. This would explain thiazide refractoriness without invoking non-adherence or secondary causes, and is testable with urinary exosome phosphoproteomics\u2014a currently feasible but underutilized clinical research tool.",
+        "priority": "medium"
+      },
+      "evidence": [
+        {
+          "claim_fragment": "Gitelman syndrome is recessively inherited, caused by inactivating mutations in the SLC12A3 gene that encodes the thiazide-sensitive sodium-chloride cotransporter (NCC)",
+          "reference": {
+            "source": "Kidney international",
+            "title": "Gitelman syndrome: consensus and guidance from a Kidney Disease: Improving Global Outcomes (KDIGO) Controversies Conference.",
+            "year": 2017,
+            "url": "https://pubmed.ncbi.nlm.nih.gov/28003083/",
+            "pmid": "28003083",
+            "grade": "expert_opinion"
+          },
+          "supports": false,
+          "entailment": "unclear",
+          "grade": "expert_opinion"
+        },
+        {
+          "claim_fragment": "The thiazide-sensitive Na(+)-Cl(-) cotransporter (TSC) is responsible for the major sodium chloride reabsorption pathway and serves as the target of thiazide-type diuretics; its mutants are associated with Gitelman's syndrome",
+          "reference": {
+            "source": "Acta biochimica et biophysica Sinica",
+            "title": "Thiazide-sensitive Na+-Cl- cotransporter: genetic polymorphisms and human diseases.",
+            "year": 2015,
+            "url": "https://pubmed.ncbi.nlm.nih.gov/25841442/",
+            "pmid": "25841442",
+            "grade": "expert_opinion"
+          },
+          "supports": false,
+          "entailment": "unclear",
+          "grade": "expert_opinion"
+        }
+      ],
+      "supporting_count": 0,
+      "contradicting_count": 0,
+      "novelty": "open_question",
+      "novelty_reason": "The core components are individually documented: SLC12A3 loss-of-function causes Gitelman syndrome (pmid=28003083, pmid=25841442); WNK1/SPAK signaling regulates NCC phosphorylation and is known to modulate ENaC; aldosterone-independent ENaC activation via WNK-SPAK has been described in animal models; and compensatory ENaC upregulation in NCC-deficient states has been reported in rodent studies. However, the specific mechanistic chain proposed here\u2014that a heterozygous hypomorphic SLC12A3 variant (not full Gitelman) drives sufficient WNK1/SPAK activation to upregulate ENaC to a degree that fully negates thiazide-induced natriuresis and sustains hypertension, and that this occurs via an aldosterone-independent route detectable in urinary exosomes\u2014has not been directly demonstrated in humans. The prediction of complete pharmacological futility of thiazides in this context, and the specific quantitative BP response to amiloride substitution, remain untested. The hypothesis is mechanistically plausible and partially grounded in existing physiology literature, but the integrated clinical claim (thiazide rendered fully ineffective by ENaC rebound in a heterozygous carrier) is unresolved and represents a genuinely testable, non-obvious extension of current knowledge.",
+      "confidence": "low",
+      "grounded": false
+    }
+  ],
+  "top_experiment": {
+    "hypothesis_id": "none",
+    "question": "No experiment was designed this run: no hypothesis was both 'open_question' and grounded (BUILD_SPEC.md \u00a76(3) novelty guard) -- every generated hypothesis was either judged 'established' (a textbook fact, not novel) or had zero grounded supporting evidence.",
+    "dataset": "Tabula Sapiens (immune compartment)",
+    "dataset_pointer": "https://tabula-sapiens-portal.ds.czbiohub.org/",
+    "method": "N/A \u2014 no eligible hypothesis this run.",
+    "protocol_steps": [
+      "N/A \u2014 no eligible hypothesis this run. Re-run with a different observation, or review each hypothesis's own novelty/grounded fields below to see why none qualified."
+    ],
+    "confirm_if": "N/A \u2014 no experiment was designed this run.",
+    "refute_if": "N/A \u2014 no experiment was designed this run.",
+    "feasibility_notes": "No hypothesis satisfied the novelty guard (open_question AND grounded) this run, so no dataset/protocol was designed. See each hypothesis's own novelty/novelty_reason/grounded fields for why.",
+    "claude_science_prompt": "N/A \u2014 no experiment was designed this run."
+  },
+  "references": [
+    {
+      "source": "clinicaltrials.gov",
+      "title": "RAS Blockade at Bedtime Versus on Awakening for Aldosterone Breakthrough",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT01805362",
+      "pmid": null,
+      "grade": "rct"
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Eplerenone for Subclinical Cardiomyopathy in Duchenne Muscular Dystrophy",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT01521546",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Relationships Among Inflammation, Physical and Mental Health in Subjects With Chronic Inflammatory Physical Diseases.",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT05125458",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Effect of Menopausal Hormone Therapy on Immune System Parameters",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT05678192",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "Clinical immunology (Orlando, Fla.)",
+      "title": "Activated double-negative T cells (CD3+CD4-CD8-HLA-DR+) define response to renal denervation for resistant hypertension.",
+      "year": 2020,
+      "url": "https://pubmed.ncbi.nlm.nih.gov/32619647/",
+      "pmid": "32619647",
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Telmisartan to Reduce AIDS-Related Fibrotic and Inflammatory Contributors (TRAFIC Study)",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT01928927",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Endometrial Cancer and Fractalkine-receptor Axis of Fractalkine",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT02774395",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Switch Study to Evaluate Dolutegravir Plus Lamivudine in Virologically Suppressed Human Immunodeficiency Virus Type 1 Positive Adults (TANGO)",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT03446573",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Timing of Sodium Intake and Nocturnal Sodium Excretion and Blood Pressure in Obese African Americans",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT04021355",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "PA Tolerability, Safety and Pharmacokinetics in Healthy Volunteers",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT04174937",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "First-In-Human Study of ChAdOx1-HBV & MVA-HBV Vaccines (VTP-300) for Chronic HBV",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT04778904",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "American journal of physiology. Renal physiology",
+      "title": "Functional NADPH oxidase 2 in T cells amplifies salt-sensitive hypertension and associated renal damage.",
+      "year": 2023,
+      "url": "https://pubmed.ncbi.nlm.nih.gov/37318993/",
+      "pmid": "37318993",
+      "grade": null
+    },
+    {
+      "source": "Respiratory research",
+      "title": "Intestinal IFN\u03b14 promotes 15-HETE diet-induced pulmonary hypertension.",
+      "year": 2024,
+      "url": "https://pubmed.ncbi.nlm.nih.gov/39609844/",
+      "pmid": "39609844",
+      "grade": null
+    },
+    {
+      "source": "Acta biochimica et biophysica Sinica",
+      "title": "Thiazide-sensitive Na+-Cl- cotransporter: genetic polymorphisms and human diseases.",
+      "year": 2015,
+      "url": "https://pubmed.ncbi.nlm.nih.gov/25841442/",
+      "pmid": "25841442",
+      "grade": "expert_opinion"
+    },
+    {
+      "source": "Kidney international",
+      "title": "Gitelman syndrome: consensus and guidance from a Kidney Disease: Improving Global Outcomes (KDIGO) Controversies Conference.",
+      "year": 2017,
+      "url": "https://pubmed.ncbi.nlm.nih.gov/28003083/",
+      "pmid": "28003083",
+      "grade": "expert_opinion"
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Thiazide Diuretics for Hypertension in Kidney Transplant Recipients Using Tacrolimus",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT02644395",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Phosphate in Blood Pressure Regulation",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT02822131",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Effects of Exogenous Ketosis on Renal Function, Renal Perfusion, and Sodium Excretory Capacity in Healthy Subjects",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT05980858",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Urinary Uromodulin, Dietary Sodium Intake and Ambulatory Blood Pressure in Patients With Chronic Kidney Disease",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT06363097",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "clinicaltrials.gov",
+      "title": "Effects of Exogenous Ketosis on Renal Function, Renal Perfusion, and Sodium Excretory Capacity",
+      "year": null,
+      "url": "https://clinicaltrials.gov/study/NCT06418074",
+      "pmid": null,
+      "grade": null
+    },
+    {
+      "source": "Cardiovascular therapeutics",
+      "title": "Hypertension, dietary salt intake, and the role of the thiazide-sensitive sodium chloride transporter NCCT.",
+      "year": 2010,
+      "url": "https://pubmed.ncbi.nlm.nih.gov/21167012/",
+      "pmid": "21167012",
+      "grade": null
+    }
+  ],
+  "contradictions_surfaced": [],
+  "uncertainty_note": "All three hypotheses remain open questions with low confidence and no direct supporting evidence. H1 proposes renal tubular chymase-driven aldosterone breakthrough amplified by post-menopausal estrogen loss and CKD, but the integrated mechanism\u2014particularly the sex-hormone modulation of chymase expression in renal tubules and its role in thiazide resistance\u2014lacks rigorous clinical validation. H2 integrates CD8+ effector-memory T cell infiltration with STAT1-mediated eNOS suppression and NOX2 upregulation into a RAAS-independent vascular loop, yet the specific mechanistic chain and clonal expansion dynamics in the adventitia remain unestablished in humans. H3 proposes that heterozygous SLC12A3 hypomorphic variants trigger aldosterone-independent ENaC upregulation via WNK1/SPAK activation sufficient to completely negate thiazide efficacy, but this quantitative prediction of pharmacological futility has not been directly tested. Readers should recognize these as mechanistically plausible but unproven hypotheses requiring targeted experimental validation before clinical application.",
+  "run_manifest": {
+    "reuse_source": "installed_iatronix",
+    "model_reasoning": "claude-sonnet-4-6",
+    "model_cheap": "claude-haiku-4-5-20251001",
+    "temperature": 0,
+    "max_hypotheses": 3,
+    "abstract_cap": 8,
+    "concurrency": 3,
+    "focus_drug": null,
+    "retrieval_snapshot_provided": false,
+    "retrieval_snapshot": {
+      "H1": {
+        "neutral_query": "Aldosterone breakthrough via non-ACE-dependent chymase-mediated angiotensin II generation in renal tubular cells drives persistent mineralocorticoid receptor activation, causing thiazide-refractory sodium retention independent of ACE inhibition. This mechanism is amplified in post-menopausal women (reduced estrogen-mediated suppression of chymase expression) and in individuals with CKD-associated tubular hypertrophy.",
+        "pubmed_query": "hypertension Aldosterone breakthrough",
+        "abstracts": [
+          {
+            "pmid": null,
+            "title": "RAS Blockade at Bedtime Versus on Awakening for Aldosterone Breakthrough",
+            "abstract": "Objective:\n\nTo show that the frequency of aldosterone breakthrough is lower when RAS blockers are given at bedtime compared to on awaking, and to analyze the determinants and consequences of aldosterone breakthrough.\n\nDuration of the study: Inclusion 2 years, follow-up one year, total 3 years Design: prospective, multicenter, randomized, controlled, open label, two parallel groups.\n\nMain selection criteria:\n\nInclusion criteria\n\n* Chronic kidney disease stage 3 to 4,\n* ACEI (captopril, enalapril, or ramipril), and/or ARB (losartan, valsartan, or irbesartan) on awaking for at least three months,",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT01805362",
+            "conditions": [
+              "Chronic Kidney Disease"
+            ],
+            "interventions": [
+              "Randomization that determine the time of treatment"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 9.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 3.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Eplerenone for Subclinical Cardiomyopathy in Duchenne Muscular Dystrophy",
+            "abstract": "Duchenne muscular dystrophy (DMD), the most common muscular dystrophy, leads to skeletal and cardiac muscle damage. Treatment of pulmonary complications has improved survival; however, heart muscle disease or cardiomyopathy has emerged as a leading cause of death, typically by the third decade. Although myocardial changes begin early, clinically significant heart disease is rarely detected in the first decade of life. Consequently, DMD cardiomyopathy frequently goes unrecognized (and untreated) until advanced (and irreversible).\n\nCurrent DMD cardiovascular care guidelines recommend beta-blocke",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT01521546",
+            "conditions": [
+              "Duchenne Muscular Dystrophy"
+            ],
+            "interventions": [
+              "eplerenone",
+              "placebo"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          }
+        ],
+        "statement": "Aldosterone breakthrough via non-ACE-dependent chymase-mediated angiotensin II generation in renal tubular cells drives persistent mineralocorticoid receptor activation, causing thiazide-refractory sodium retention independent of ACE inhibition. This mechanism is amplified in post-menopausal women (reduced estrogen-mediated suppression of chymase expression) and in individuals with CKD-associated tubular hypertrophy."
+      },
+      "H2": {
+        "neutral_query": "Clonally expanded CD8+ effector-memory T cells infiltrating the perivascular adventitia produce IFN-\u03b3 and IL-17A, which transcriptionally suppress endothelial nitric oxide synthase (eNOS) via STAT1-mediated promoter methylation and simultaneously upregulate NADPH oxidase (NOX2) in vascular smooth muscle, creating a self-sustaining oxidative-inflammatory loop that maintains elevated vascular resistance independently of RAAS activity.",
+        "pubmed_query": "hypertension CD8 cells",
+        "abstracts": [
+          {
+            "pmid": null,
+            "title": "Effect of Menopausal Hormone Therapy on Immune System Parameters",
+            "abstract": "The objective of the study is to evaluate the effect of menopausal hormone therapy on the parameters of the immune system. To do this, patients took blood to assess the immune status before the start of therapy and after 3 months.\n\nAn additional task is to assess the content of blood sex hormones before the start of therapy and after 3 months.",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT05678192",
+            "conditions": [
+              "Last Period Not Earlier Than 6 Months Ago"
+            ],
+            "interventions": [
+              "oral menopausal hormone therapy",
+              "transdermal menopausal hormone therapy"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "PA Tolerability, Safety and Pharmacokinetics in Healthy Volunteers",
+            "abstract": "This is a first-in-human (FIH) study to explore the safety, tolerability and pharmacokinetics of PA after oral ascending dose administration to healthy male volunteers.",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT04174937",
+            "conditions": [
+              "Infections, Respiratory"
+            ],
+            "interventions": [
+              "Potentiator of antibiotics (PA)",
+              "Placebo PA"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Timing of Sodium Intake and Nocturnal Sodium Excretion and Blood Pressure in Obese African Americans",
+            "abstract": "Experimental data have shown that timing of sodium intake impacts diurnal patterns of sodium excretion. The purpose of this study is to test the hypothesis that the time of day for salt intake impacts (1) blood pressure rhythms and urinary sodium excretion and (2) circadian timing of factors responsible for blood pressure regulation and cardiometabolic health in obese individuals. These studies will address two aims. The first aim will test the hypothesis that limiting high salt intake prior to sleep increases day-night differences in blood pressure, improves timing of urinary sodium excretion",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT04021355",
+            "conditions": [
+              "Obesity",
+              "Hypertension",
+              "Circadian Dysregulation",
+              "Salt; Excess"
+            ],
+            "interventions": [
+              "Oral sodium supplementation"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Relationships Among Inflammation, Physical and Mental Health in Subjects With Chronic Inflammatory Physical Diseases.",
+            "abstract": "The prevalence of common mental disorders is high in patients with chronic inflammatory physical diseases(e.g., autoimmune or infectious diseases). The traditional explanatory causation model in which physical symptoms and related disability drive mental health problems is now called into question, and evidence has accumulated supporting more complex interactions whereby psychiatric disorders can both result from and contribute to the progression of physical diseases. In the present project, the investigators will focus on comorbidity of depression and anxiety symptoms or syndromes with chroni",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT05125458",
+            "conditions": [
+              "Chronic Infectious Disease",
+              "Chronic Skin Disease",
+              "Mental Disorders",
+              "Psoriasis",
+              "Hidradenitis Suppurativa",
+              "Atopic Dermatitis",
+              "Hiv",
+              "HBV"
+            ],
+            "interventions": [],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Endometrial Cancer and Fractalkine-receptor Axis of Fractalkine",
+            "abstract": "The endometrial cancers are among the most common malignancies in postmenopausal women with an incidence on the rise. It is most often a endometrioid adenocarcinoma (grade I, II, III). Other histological types are represented mainly by the clear cell carcinoma, papillary serous carcinoma, the carcinosarcoma. The main risk factors for endometrial cancer are age, obesity, diabetes, hypertension, hormone replacement therapy with estrogen and tamoxifen.\n\nEndometrial hyperplasia usually precedes endometrial cancer is classified by degree of cytologic atypia. Tumor grade quantifies the degree of dif",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT02774395",
+            "conditions": [
+              "Endometrial Cancer"
+            ],
+            "interventions": [],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "PA Tolerability, Safety and Pharmacokinetics in Healthy Volunteers",
+            "abstract": "This is a first-in-human (FIH) study to explore the safety, tolerability and pharmacokinetics of PA after oral ascending dose administration to healthy male volunteers.",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT04174937",
+            "conditions": [
+              "Infections, Respiratory"
+            ],
+            "interventions": [
+              "Potentiator of antibiotics (PA)",
+              "Placebo PA"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Relationships Among Inflammation, Physical and Mental Health in Subjects With Chronic Inflammatory Physical Diseases.",
+            "abstract": "The prevalence of common mental disorders is high in patients with chronic inflammatory physical diseases(e.g., autoimmune or infectious diseases). The traditional explanatory causation model in which physical symptoms and related disability drive mental health problems is now called into question, and evidence has accumulated supporting more complex interactions whereby psychiatric disorders can both result from and contribute to the progression of physical diseases. In the present project, the investigators will focus on comorbidity of depression and anxiety symptoms or syndromes with chroni",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT05125458",
+            "conditions": [
+              "Chronic Infectious Disease",
+              "Chronic Skin Disease",
+              "Mental Disorders",
+              "Psoriasis",
+              "Hidradenitis Suppurativa",
+              "Atopic Dermatitis",
+              "Hiv",
+              "HBV"
+            ],
+            "interventions": [],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Telmisartan to Reduce AIDS-Related Fibrotic and Inflammatory Contributors (TRAFIC Study)",
+            "abstract": "The main goal of this study was to see if a drug called telmisartan would decrease fibrosis (scarring) and inflammation (irritation) in people who are infected with HIV and doing well on their HIV medications. The study was also done to see what effects telmisartan has on other signs of disease and inflammation in the body, and to see whether people who have HIV can take telmisartan safely and without side effects that make them want to stop the drug. Telmisartan is FDA-approved for treating high blood pressure and decreasing the chance of heart attacks and strokes in people over the age of 55",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT01928927",
+            "conditions": [
+              "HIV-1 Infection"
+            ],
+            "interventions": [
+              "Telmisartan"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          }
+        ],
+        "statement": "Clonally expanded CD8+ effector-memory T cells infiltrating the perivascular adventitia produce IFN-\u03b3 and IL-17A, which transcriptionally suppress endothelial nitric oxide synthase (eNOS) via STAT1-mediated promoter methylation and simultaneously upregulate NADPH oxidase (NOX2) in vascular smooth muscle, creating a self-sustaining oxidative-inflammatory loop that maintains elevated vascular resistance independently of RAAS activity."
+      },
+      "H3": {
+        "neutral_query": "A loss-of-function variant in SLC12A3 (encoding the thiazide-sensitive NCC cotransporter) paradoxically causes compensatory upregulation of the epithelial sodium channel (ENaC) via aldosterone-independent WNK1/SPAK kinase pathway activation, such that thiazide occupancy of NCC triggers a homeostatic rebound that fully restores sodium reabsorption through ENaC, rendering the diuretic component of triple therapy ineffective and maintaining volume-dependent hypertension.",
+        "pubmed_query": "hypertension SLC12A3 thiazide",
+        "abstracts": [
+          {
+            "pmid": null,
+            "title": "Urinary Uromodulin, Dietary Sodium Intake and Ambulatory Blood Pressure in Patients With Chronic Kidney Disease",
+            "abstract": "In chronic kidney disease (CKD), hypertension is characterized by the phenomenon of sodium-sensitivity, i.e., the disproportionate increase in blood pressure (BP) due to an increase in dietary sodium consumption to maintain homeostasis through urinary sodium excretion. Impaired renal circulation, blunt suppression of renin-angiotensin-aldosterone system, sympathetic nervous system overactivity, paradoxically reduced levels of atrial natriuretic peptide and hyperinsulinemia represent the main pathophysiologic mechanisms. Accumulated evidence has suggested that uromodulin plays a central role in",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT06363097",
+            "conditions": [
+              "Chronic Kidney Disease",
+              "Hypertension"
+            ],
+            "interventions": [],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Effects of Exogenous Ketosis on Renal Function, Renal Perfusion, and Sodium Excretory Capacity in Healthy Subjects",
+            "abstract": "This is a randomized, placebo-controlled, double-blinded crossover design. Fifteen healthy subjects will be randomized to receive either ketone bodies (KE4) or placebo delivered by KetoneAid. After a period of 5-days treatment, effect variables will be measured (experiment day 1). After a washout period of 14 days, the subjects are crossed over to a similar treatment period with the other treatment. The study is terminated by measuring effect variables after the second treatment period (experiment day 2).",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT05980858",
+            "conditions": [
+              "Ketosis",
+              "Ketonemia"
+            ],
+            "interventions": [
+              "Beta-hydroxybutyrate",
+              "Placebo"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Phosphate in Blood Pressure Regulation",
+            "abstract": "High dietary phosphate intake in the general population is associated with a higher risk for developing kidney disease and cardiovascular disease with an increased overall mortality. Whereas the effects of high phosphate intake on general health become clearer, almost nothing is known about underlying mechanisms. More recently, the investigators and others found in animal models that FGF23 stimulates the renal NaCl cotransporter NCC, the target of thiazide diuretics, and that increased NCC activity may increase blood pressure. The investigators could also show that increasing dietary phosphate",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT02822131",
+            "conditions": [
+              "Hypertension"
+            ],
+            "interventions": [
+              "sodium phosphate",
+              "sevelamer, sodium bicarbonate, sodium chloride"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Thiazide Diuretics for Hypertension in Kidney Transplant Recipients Using Tacrolimus",
+            "abstract": "Background: Calcineurin inhibitors (CNIs) are the most commonly used immunosuppressive drugs to prevent rejection after kidney transplantation. However, the efficacy of preventing rejection comes at the cost of important side-effects. Among the most common side-effects is hypertension. Hypertension after kidney transplantation is clinically relevant, because it increases the risk of cardiovascular disease and is associated with increased graft loss and recipient mortality. The mechanism of CNI-induced hypertension is incompletely understood and, therefore, the treatment is currently empiric. T",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT02644395",
+            "conditions": [
+              "Hypertension",
+              "Kidney Transplantation"
+            ],
+            "interventions": [
+              "Chlorthalidone",
+              "Amlodipine"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Effects of Exogenous Ketosis on Renal Function, Renal Perfusion, and Sodium Excretory Capacity",
+            "abstract": "This is a randomized, placebo-controlled, double-blinded crossover design. Nineteen patients with essential hypertension will be randomized to receive either ketone bodies (KE4) or placebo delivered by KetoneAid. After a period of 5-days treatment, effect variables will be measured (experiment day 1). After a washout period of 14 days, the subjects are crossed over to a similar treatment period with the other treatment. The study is terminated by measuring effect variables after the second treatment period (experiment day 2).",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT06418074",
+            "conditions": [
+              "Ketosis",
+              "Essential Hypertension"
+            ],
+            "interventions": [
+              "Ketone Monoester (KE4)",
+              "Placebo"
+            ],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": null,
+            "title": "Urinary Uromodulin, Dietary Sodium Intake and Ambulatory Blood Pressure in Patients With Chronic Kidney Disease",
+            "abstract": "In chronic kidney disease (CKD), hypertension is characterized by the phenomenon of sodium-sensitivity, i.e., the disproportionate increase in blood pressure (BP) due to an increase in dietary sodium consumption to maintain homeostasis through urinary sodium excretion. Impaired renal circulation, blunt suppression of renin-angiotensin-aldosterone system, sympathetic nervous system overactivity, paradoxically reduced levels of atrial natriuretic peptide and hyperinsulinemia represent the main pathophysiologic mechanisms. Accumulated evidence has suggested that uromodulin plays a central role in",
+            "year": null,
+            "journal": "ClinicalTrials.gov",
+            "doi": null,
+            "pmcid": null,
+            "nct_id": "NCT06363097",
+            "conditions": [
+              "Chronic Kidney Disease",
+              "Hypertension"
+            ],
+            "interventions": [],
+            "status": "COMPLETED",
+            "pub_types": [
+              "Clinical Trial"
+            ],
+            "source": "clinicaltrials.gov",
+            "_rank_score": 6.0,
+            "_rank_breakdown": {
+              "study_type": 6.0,
+              "relevance": 0.0,
+              "recency": 0.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": "28003083",
+            "title": "Gitelman syndrome: consensus and guidance from a Kidney Disease: Improving Global Outcomes (KDIGO) Controversies Conference.",
+            "abstract": "Gitelman syndrome (GS) is a rare, salt-losing tubulopathy characterized by hypokalemic metabolic alkalosis with hypomagnesemia and hypocalciuria. The disease is recessively inherited, caused by inactivating mutations in the SLC12A3 gene that encodes the thiazide-sensitive sodium-chloride cotransporter (NCC). GS is usually detected during adolescence or adulthood, either fortuitously or in association with mild or nonspecific symptoms or both. The disease is characterized by high phenotypic variability and a significant reduction in the quality of life, and it may be associated with severe manifestations. GS is usually managed by a liberal salt intake together with oral magnesium and potassium supplements. A general problem in rare diseases is the lack of high quality evidence to inform diagnosis, prognosis, and management. We report here on the current state of knowledge related to the diagnostic evaluation, follow-up, management, and treatment of GS; identify knowledge gaps; and propose a research agenda to substantiate a number of issues related to GS. This expert consensus statement aims to establish an\u00a0initial framework to enable clinical auditing and thus improve quality control of care.",
+            "year": 2017,
+            "collective_name": null,
+            "journal": "Kidney international",
+            "doi": "10.1016/j.kint.2016.09.046",
+            "pmcid": null,
+            "_rank_score": 1.0,
+            "_rank_breakdown": {
+              "study_type": 0.0,
+              "relevance": 0.0,
+              "recency": 1.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          },
+          {
+            "pmid": "25841442",
+            "title": "Thiazide-sensitive Na+-Cl- cotransporter: genetic polymorphisms and human diseases.",
+            "abstract": "The thiazide-sensitive Na(+)-Cl(-) cotransporter (TSC) is responsible for the major sodium chloride reabsorption pathway, which is located in the apical membrane of the epithelial cells of the distal convoluted tubule. TSC is involved in several physiological activities including transepithelial ion absorption and secretion, cell volume regulation, and setting intracellular Cl(-) concentration below or above its electrochemical potential equilibrium. In addition, TSC serves as the target of thiazide-type diuretics that are the first line of therapy for the treatment of hypertension in the clinic, and its mutants are also reported to be associated with the hereditary disease, Gitelman's syndrome. This review aims to summarize the publications with regard to the TSC by focusing on the association between TSC mutants and human hypertension as well as Gitelman's syndrome.",
+            "year": 2015,
+            "collective_name": null,
+            "journal": "Acta biochimica et biophysica Sinica",
+            "doi": "10.1093/abbs/gmv020",
+            "pmcid": null,
+            "_rank_score": 1.0,
+            "_rank_breakdown": {
+              "study_type": 0.0,
+              "relevance": 0.0,
+              "recency": 1.0,
+              "fulltext": 0.0,
+              "citations": 0.0,
+              "penalty": 0.0
+            }
+          }
+        ],
+        "statement": "A loss-of-function variant in SLC12A3 (encoding the thiazide-sensitive NCC cotransporter) paradoxically causes compensatory upregulation of the epithelial sodium channel (ENaC) via aldosterone-independent WNK1/SPAK kinase pathway activation, such that thiazide occupancy of NCC triggers a homeostatic rebound that fully restores sodium reabsorption through ENaC, rendering the diuretic component of triple therapy ineffective and maintaining volume-dependent hypertension."
+      }
+    },
+    "selected_experiment_hypothesis_id": "none",
+    "dataset_pointer": "https://tabula-sapiens-portal.ds.czbiohub.org/",
+    "run_started_at": "2026-07-09T03:12:34.602187+00:00",
+    "generated_at": "2026-07-09T03:13:41.739419+00:00",
+    "token_spend": {
+      "calls": 11,
+      "input_tokens": 9320,
+      "output_tokens": 4944,
+      "total_tokens": 14264
+    }
+  },
+  "disclaimer": "Research hypothesis generation only. Not clinical, diagnostic, or prescribing advice."
+}

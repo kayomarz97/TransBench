@@ -174,6 +174,75 @@ regardless:
 
 ---
 
+## Deterministic demo / snapshot mode
+
+`TRANSBENCH_MODE` is an optional env var that toggles how `run_transbench`
+sources its output — read directly off the process env inside
+`transbench.engine.run_transbench` itself, so it applies to **every**
+caller, including the MCP tools (`generate_experiment`/
+`search_grounded_evidence`), with zero code changes anywhere else:
+
+| `TRANSBENCH_MODE` | Behavior |
+|---|---|
+| `live` (default, or unset) | The normal full 8-agent pipeline — completely unchanged. |
+| `golden` | Returns a pre-captured, complete `TransBrief` **verbatim**, instead of running the pipeline at all — for a fully deterministic demo replay. |
+| `snapshot` | Runs the **real** pipeline (real decompose/hypothesize/grade/entailment/novelty/design/assemble LLM calls) but replays PubMed retrieval from a bundled snapshot instead of hitting PubMed live — fixed evidence, live LLM reasoning on top of it. |
+
+Two optional path env vars point at the bundled files (a relative path
+resolves against the repo root; both already have working defaults, checked
+into `snapshots/`):
+
+| Env var | Default |
+|---|---|
+| `TRANSBENCH_GOLDEN_BRIEF` | `snapshots/flagship_golden_brief.json` |
+| `TRANSBENCH_RETRIEVAL_SNAPSHOT` | `snapshots/flagship_retrieval_snapshot.json` |
+
+**Safety guards — neither mode can silently serve the wrong content:**
+
+- `golden` mode returns the golden brief only if the caller's `observation`
+  matches the golden brief's own `request_echo` (normalized:
+  strip/lower/collapse-whitespace). A mismatch — or a missing/invalid golden
+  file — logs a clear warning and transparently falls back to running the
+  live pipeline instead.
+- `snapshot` mode's replay is keyed by hypothesis id **and** guarded by the
+  hypothesis's own `statement`: each bundled snapshot entry also stores the
+  exact hypothesis statement it was captured for, and a given hypothesis's
+  evidence is only replayed if the *current* run's hypothesis statement
+  matches (normalized) — otherwise that one hypothesis transparently falls
+  back to live PubMed retrieval (logged), so a fresh hypothesis that happens
+  to reuse an old id can never be served evidence captured for a different
+  hypothesis. (This is the same underlying `retrieval_snapshot` replay
+  mechanism `TransRequest.retrieval_snapshot` has used since Phase 5 —
+  BUILD_SPEC.md §9 — now with this extra statement-match guard layered on
+  top of the original id-only keying.)
+
+Usage — via the engine directly:
+
+```bash
+TRANSBENCH_MODE=golden PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "
+import asyncio
+from transbench.engine import run_transbench
+brief = asyncio.run(run_transbench(
+    '58F, resistant hypertension despite ACEi + CCB + thiazide at max dose; '
+    'elevated hs-CRP; poor response to RAAS blockade.'
+))
+print(brief.top_experiment.claude_science_prompt)
+"
+```
+
+Or via the MCP connector — set `TRANSBENCH_MODE` (and, if needed, the two
+path env vars above) in the connector's own registration `env` block
+alongside `ANTHROPIC_API_KEY`/`PYTHONDONTWRITEBYTECODE` (see
+[`mcp_server/README.md`](mcp_server/README.md)'s register-block JSON) —
+`generate_experiment`/`search_grounded_evidence` pick it up automatically,
+no other change required.
+
+The two bundled files under `snapshots/` were captured from one real,
+live flagship run (`fixtures.FLAGSHIP_OBSERVATION`) and contain only public
+PubMed metadata plus the generated brief itself — no API keys or secrets.
+
+---
+
 ## Reusing Iatronix (read-only)
 
 TransBench never edits Iatronix. It only imports **DB-free leaf functions**
@@ -223,6 +292,7 @@ Key test files:
 | `tests/test_mcp_parity.py` | The MCP tools faithfully pass through the engine's brief; retrieval-snapshot replay is deterministic with zero network calls. |
 | `tests/test_agents_phase2.py` / `test_retrieval_phase3.py` / `test_experiment_phase5.py` | Per-phase acceptance tests (decompose/hypothesize; retrieval+grading+grounding; experiment design + full brief assembly). |
 | `tests/test_pubmed_query_builder.py` / `test_rigor_entailment_correlation.py` | Fully offline regression guards for the PubMed query builder and the entailment-correlation fix. |
+| `tests/test_snapshot_toggle.py` | `TRANSBENCH_MODE=live\|golden\|snapshot` (see [Deterministic demo / snapshot mode](#deterministic-demo--snapshot-mode)) — fully offline/deterministic, zero live calls. |
 
 ---
 
@@ -233,6 +303,7 @@ transbench/
 ├─ src/transbench/        # config, schemas, prompts, reuse seam, 8 agents, rigor, LangGraph engine
 ├─ mcp_server/             # FastMCP server (stdio + HTTP), run scripts, connector manifest
 ├─ tests/                  # fixtures + full test suite (see above)
+├─ snapshots/               # bundled golden brief + retrieval snapshot (see "Deterministic demo / snapshot mode")
 ├─ BUILD_SPEC.md            # full design spec (reuse strategy, schemas, agents, prompts, rigor, MCP, demo)
 ├─ KICKOFF.md               # phase-by-phase build plan + non-negotiable rules
 ├─ CLAUDE_SCIENCE_SETUP.md  # Claude Science connector registration walkthrough
