@@ -241,8 +241,9 @@ async def _call_engine_safely(observation: str, focus_drug: Optional[str]) -> tu
 
 @mcp_app.tool()
 async def generate_experiment(observation: str, focus_drug: str = "") -> dict[str, Any]:
-    """Generate a grounded translational research brief from a clinical
-    observation about antihypertensive drugs.
+    """Generate a grounded translational research brief from ANY clinical or
+    biomedical observation — a disease's drug response/resistance, a drug's
+    adverse effect/toxicity, or any mechanism (not limited to any one domain).
 
     Runs the full TransBench pipeline (decompose -> hypothesize -> retrieve
     -> grade -> entail -> novelty-check -> design -> assemble) and returns a
@@ -254,10 +255,11 @@ async def generate_experiment(observation: str, focus_drug: str = "") -> dict[st
     in Claude Science to produce a reproducible figure.
 
     Args:
-        observation: A free-text clinical observation about antihypertensive
-            drug response/resistance (3-8000 characters). Example: "58F,
-            resistant hypertension despite ACEi + CCB + thiazide at max
-            dose; elevated hs-CRP; poor response to RAAS blockade."
+        observation: A free-text clinical/biomedical observation (3-8000
+            characters) — any disease, drug response/resistance, adverse
+            effect, or mechanism. Examples: "58F, resistant hypertension
+            despite ACEi + CCB + thiazide; elevated hs-CRP" or "30M on
+            amiodarone for AF, developed neutropenia".
         focus_drug: Optional drug name to focus the analysis on. Omit
             ("") to let the pipeline infer relevant drugs from the
             observation itself.
@@ -321,9 +323,10 @@ def _grounded_evidence_projection(brief: TransBrief) -> dict[str, Any]:
 
 @mcp_app.tool()
 async def search_grounded_evidence(question: str) -> dict[str, Any]:
-    """Look up PubMed-grounded mechanistic evidence for a clinical/
-    pharmacological question about antihypertensive drugs (utility /
-    fallback tool — a lighter-weight sibling of ``generate_experiment``).
+    """Look up PubMed-grounded mechanistic evidence for ANY clinical,
+    pharmacological, or mechanistic question (utility / fallback tool — a
+    lighter-weight sibling of ``generate_experiment``, not limited to any
+    one domain).
 
     Runs the SAME full TransBench pipeline as ``generate_experiment`` (it is
     not a separate, cheaper retrieval path) but returns a smaller,
@@ -334,8 +337,8 @@ async def search_grounded_evidence(question: str) -> dict[str, Any]:
     uncertainty note. Omits ``axes``/``top_experiment``/``run_manifest``.
 
     Args:
-        question: A free-text clinical/mechanistic question about
-            antihypertensive drugs (3-8000 characters).
+        question: A free-text clinical/pharmacological/mechanistic question
+            (3-8000 characters), any domain.
 
     Returns:
         The grounded-evidence projection dict on success, or

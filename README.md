@@ -262,7 +262,8 @@ bit-identical, so the *reproducible artifact* is the experiment (named dataset +
 ### MCP server
 
 [`mcp_server/server.py`](mcp_server/server.py) is a FastMCP server (`mcp==1.28.1`) exposing two tools
-over **stdio** (what Claude Science spawns) and **streamable-HTTP** (fallback):
+over **streamable-HTTP** (how Claude Science connects — as a local URL connector, `localhost:8500`)
+and **stdio** (for direct/embedded use):
 
 - **`generate_experiment(observation, focus_drug="")`** — the full grounded `TransBrief`.
 - **`search_grounded_evidence(question)`** — the same engine run, reshaped into a lighter
@@ -312,20 +313,28 @@ gitignored):
 
 ---
 
-## Run the MCP server & register in Claude Science
+## Use it with Claude Science (fully local)
+
+The private, local way is to use TransBench **alongside** Claude Science — one command gives you a
+grounded brief plus a paste-ready prompt:
 
 ```bash
-bash mcp_server/run_stdio.sh   # stdio — what Claude Science spawns
-bash mcp_server/run_http.sh    # HTTP fallback (streamable-http), localhost:8500
+bash mcp_server/ask.sh "33F, resistant hypertension on telmisartan + thiazide + CCB; raised CRP"
 ```
+Copy the printed **`claude_science_prompt`** block into a Claude Science chat → CS loads the dataset
+and produces the reproducible figure. Nothing is exposed on a network.
 
-TransBench registers as a local **stdio** MCP server whose `command` is this repo's **own venv**
-Python (`/root/projects/transbench/.venv/bin/python -m mcp_server.server`, `cwd` = repo root,
-`PYTHONDONTWRITEBYTECODE=1` in the connector's `env` block). Full walkthrough:
-**[`CLAUDE_SCIENCE_SETUP.md`](CLAUDE_SCIENCE_SETUP.md)** and **[`mcp_server/README.md`](mcp_server/README.md)**.
+> **Prefer a real connector (CS agent calls the tool)?** CS's **Local command** connector can't work
+> for a tool that itself calls an LLM (its sandbox returns `403` for `api.anthropic.com` → the 402/403
+> wall), and **Remote** requires a *public https* URL (`safeFetch` rejects `http://` + localhost). So
+> expose the local server at a **private HTTPS URL** via a tunnel — nginx + Cloudflare (proxied origin,
+> secret-path, origin locked to Cloudflare IPs) or `cloudflared`. Standalone **"set up your own tunnel"**
+> guide + the one gotcha (`proxy_set_header Host 127.0.0.1:8500` — TransBench rejects other Hosts) is in
+> **[`CLAUDE_SCIENCE_SETUP.md`](CLAUDE_SCIENCE_SETUP.md)**.
 
-**Manual-paste fallback** (zero dependency on the live connector): run the engine, then paste
-`top_experiment.claude_science_prompt` straight into a Claude Science chat.
+> ⚕️ **Healthcare note:** TransBench is not offline — reasoning is Anthropic's cloud API and it
+> queries PubMed, so submitted observation text is sent to Anthropic's API. **De-identify before
+> submitting.** The server/orchestration stay local; the LLM does not.
 
 ---
 

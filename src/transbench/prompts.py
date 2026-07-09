@@ -65,9 +65,16 @@ DECOMPOSER_SYSTEM_PROMPT = (
     "tumor_microenvironment, host_pathogen_interaction, "
     "genetic_pharmacogenomic — do not force-fit a fixed list; only include "
     "axes the observation motivates). Also identify condition_anchor: the "
-    "single primary disease/condition this observation is about, in plain "
-    "words (e.g. 'rheumatoid arthritis', 'melanoma', 'type 2 diabetes', "
-    "'hypertension'). Give rationale + key entities for each axis. STRICT "
+    "1-3 plain-word terms naming what the observation is FUNDAMENTALLY "
+    "investigating (its primary translational focus) — this anchors evidence "
+    "retrieval, so choose by what it is really about, NOT merely the disease "
+    "named. If it is about a DRUG'S ADVERSE EFFECT or TOXICITY (e.g. "
+    "'developed X while on drug Y'), anchor on the DRUG + the ADVERSE EVENT "
+    "(e.g. 'amiodarone neutropenia') and DROP the incidental indication the "
+    "drug was prescribed for. If it is about a disease's DRUG RESPONSE/"
+    "RESISTANCE or a disease mechanism, anchor on the DISEASE (e.g. "
+    "'rheumatoid arthritis', 'melanoma', 'hypertension'). Give rationale + "
+    "key entities for each axis. STRICT "
     'JSON {"condition_anchor","axes":[{"axis","rationale","key_entities"}]}.'
 )
 

@@ -20,6 +20,14 @@ export MCP_TRANSPORT="streamable-http"
 export MCP_HTTP_HOST="${MCP_HTTP_HOST:-127.0.0.1}"
 export MCP_HTTP_PORT="${MCP_HTTP_PORT:-8500}"
 
+# Deep-reasoning tier: Opus for hypothesize + experiment-design (the two quality
+# levers). Needs a provider registry that includes Opus, so point at the
+# transbench-owned providers.yaml (base models + claude-opus-4-8; Iatronix's own
+# file is untouched). Set MODEL_DEEP=claude-sonnet-4-6 to disable Opus (cost) —
+# everything still works, since MODEL_DEEP defaults to the Sonnet reasoning tier.
+export MODEL_DEEP="${MODEL_DEEP:-claude-opus-4-8}"
+export PROVIDERS_CONFIG_PATH="${PROVIDERS_CONFIG_PATH:-${REPO_ROOT}/config/providers.yaml}"
+
 PYTHON_BIN="${REPO_ROOT}/.venv/bin/python"
 if [[ ! -x "$PYTHON_BIN" ]]; then
     echo "error: venv python not found at $PYTHON_BIN (create it per PLAN.md Phase 0 first)" >&2

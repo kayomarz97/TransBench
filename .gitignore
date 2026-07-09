@@ -11,3 +11,7 @@ DEMO.md
 STORYLINE.md
 summary.md
 SUMMARY.md
+
+# Private tunnel details (real domain / IP / secret path) — NEVER commit
+tunnel.local.md
+*.local.md

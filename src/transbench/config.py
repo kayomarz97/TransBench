@@ -60,9 +60,17 @@ REPO_ROOT: Path = _REPO_ROOT
 os.environ.setdefault("LLM_TEMPERATURE", "0")
 
 # --- Model ids — real, registry-known Anthropic ids only (BUILD_SPEC.md §0.8) ---
-# Reasoning agents (hypothesize / novelty / design): Sonnet.
+# Reasoning tier (decompose / novelty): Sonnet. Decompose was upgraded from Haiku
+# so it can reason about the observation's TYPE (drug-toxicity vs disease-response)
+# when choosing the retrieval focus anchor.
 MODEL_REASONING: str = "claude-sonnet-4-6"
-# Mechanical agents (decompose / grade / entailment / assemble): Haiku.
+# Deep-reasoning tier (hypothesize / experiment-design — the two biggest quality
+# levers: the creative core + the runnable claude_science_prompt). Env-overridable
+# via MODEL_DEEP; defaults to the reasoning tier so any entrypoint whose provider
+# registry lacks Opus still works. The MCP server (run_http.sh) sets
+# MODEL_DEEP=claude-opus-4-8 + PROVIDERS_CONFIG_PATH to a registry that has Opus.
+MODEL_DEEP: str = os.environ.get("MODEL_DEEP") or MODEL_REASONING
+# Mechanical tier (grade / entailment / assemble / query-neutralize): Haiku.
 MODEL_CHEAP: str = "claude-haiku-4-5-20251001"
 
 # --- Caps (BUILD_SPEC.md §0.7, §3, §9) ---

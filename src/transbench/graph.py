@@ -74,7 +74,7 @@ class TransBenchState(TypedDict, total=False):
 
 
 async def _decompose_node(state: TransBenchState) -> TransBenchState:
-    """Agent 1 — Decomposer (Haiku, ``config.MODEL_CHEAP``). Real LLM call —
+    """Agent 1 — Decomposer (Sonnet, ``config.MODEL_REASONING``). Real LLM call —
     builds its own temperature-0 client via :func:`agents.build_llm` for
     this one call (BUILD_SPEC.md §5: "Build clients once").
 
@@ -84,8 +84,13 @@ async def _decompose_node(state: TransBenchState) -> TransBenchState:
     :func:`_retrieve_and_grade_node` can thread it into every hypothesis's
     real PubMed retrieval anchor.
     """
+    # Decompose now REASONS about the observation's TYPE (drug-toxicity vs
+    # disease-response) to choose a focused condition_anchor, so it runs on the
+    # reasoning tier (Sonnet), not Haiku: Haiku was unreliable at excluding an
+    # incidental indication — e.g. anchoring retrieval on 'atrial fibrillation'
+    # for an amiodarone-neutropenia observation, grounding zero evidence.
     llm = agents.build_llm(
-        state.get("model_cheap", config.MODEL_CHEAP),
+        state.get("model_reasoning", config.MODEL_REASONING),
         state.get("user_key"),
         state.get("user_provider", "anthropic"),
     )
@@ -97,10 +102,11 @@ async def _decompose_node(state: TransBenchState) -> TransBenchState:
 
 
 async def _hypothesize_node(state: TransBenchState) -> TransBenchState:
-    """Agent 2 — Hypothesis Generator (Sonnet, ``config.MODEL_REASONING``).
-    Real LLM call — grounded in agent 1's axes output."""
+    """Agent 2 — Hypothesis Generator (Opus, ``config.MODEL_DEEP``). Real LLM
+    call — grounded in agent 1's axes output. Runs on the deep-reasoning tier:
+    the creative core (novel, falsifiable mechanisms) is the biggest quality lever."""
     llm = agents.build_llm(
-        state.get("model_reasoning", config.MODEL_REASONING),
+        state.get("model_deep", config.MODEL_DEEP),
         state.get("user_key"),
         state.get("user_provider", "anthropic"),
     )
@@ -339,8 +345,10 @@ async def _design_node(state: TransBenchState) -> TransBenchState:
 
     top_experiment: Optional[ExperimentPlan] = None
     if selected is not None:
+        # Experiment design runs on the deep-reasoning tier — it authors the
+        # runnable claude_science_prompt, which is the deliverable.
         llm = agents.build_llm(
-            state.get("model_reasoning", config.MODEL_REASONING),
+            state.get("model_deep", config.MODEL_DEEP),
             state.get("user_key"),
             state.get("user_provider", "anthropic"),
         )

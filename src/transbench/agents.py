@@ -2370,6 +2370,7 @@ async def run_assemble(state: dict, llm) -> TransBrief:
     run_manifest: dict[str, Any] = {
         "reuse_source": REUSE_SOURCE,
         "model_reasoning": state.get("model_reasoning", config.MODEL_REASONING),
+        "model_deep": state.get("model_deep", config.MODEL_DEEP),
         "model_cheap": state.get("model_cheap", config.MODEL_CHEAP),
         "temperature": config.TEMPERATURE,
         "max_hypotheses": state.get("max_hypotheses", config.MAX_HYPOTHESES),
