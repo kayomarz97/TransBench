@@ -275,9 +275,12 @@ Both call `engine.run_transbench` directly (no duplicated logic) and catch `crea
 ### Cost
 
 Per run ≈ 1 decompose + 1 hypothesize + 3 grade + 3 entailment + 3 novelty + 1 design + 1 assemble
-(+ ≤3 short neutralize calls) ≈ **~13 LLM calls** (Haiku for mechanical agents, Sonnet for
-reasoning), plus live PubMed and one GEO content-verification fetch. Hypotheses are capped at 3,
-abstracts at 8/hypothesis, fan-out concurrency at 3.
+(+ ≤3 short neutralize calls) ≈ **~13 LLM calls** across three tiers — **Haiku** (grade / entail /
+assemble / neutralize), **Sonnet** (decompose / novelty), and **Opus** (`MODEL_DEEP`: hypothesize +
+experiment-design — the two quality levers) — plus live PubMed and one GEO content-verification fetch.
+Opus lifts per-run cost, but grading (the many-call step) stays on Haiku so it's bounded; set
+`MODEL_DEEP=claude-sonnet-4-6` to run without Opus. Hypotheses are capped at 3, abstracts at
+8/hypothesis, fan-out concurrency at 3.
 
 ---
 
@@ -286,19 +289,13 @@ abstracts at 8/hypothesis, fan-out concurrency at 3.
 Requires **Python ≥ 3.11** and [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
-cd /root/projects/transbench
-uv venv --python 3.12
+git clone <repo> && cd transbench
+uv sync                                  # installs everything; runs on the vendored Iatronix copy
+                                         # (src/vendored/) — no external med-ai-project needed
 
-# Iatronix backend, read-only + editable, WITHOUT its DB/cloud dep tree:
-uv pip install -e /root/projects/med-ai-project/backend --no-deps
-
-# The curated, lean deps the reused leaves actually need:
-uv pip install mcp langgraph langchain langchain-anthropic langchain-core \
-    anthropic httpx "pydantic>=2" pydantic-settings pyyaml fastapi \
-    json-repair tenacity python-dotenv
-
-uv pip install -e .                     # this package
-uv pip install pytest pytest-asyncio    # tests
+# (optional) develop against the LIVE Iatronix source instead of src/vendored/
+# (Path A, REUSE_SOURCE=installed_iatronix):
+uv pip install --no-deps -e /path/to/med-ai-project/backend
 ```
 
 Copy `.env.example` to `.env` and fill in your own keys — **never commit real keys** (`.env` is
@@ -310,6 +307,8 @@ gitignored):
 | `PUBMED_API_KEY` | no | Raises NCBI/PubMed rate limits. |
 | `LLM_TEMPERATURE` | `=0` | Forces deterministic clients (belt 1 of 2). |
 | `PYTHONDONTWRITEBYTECODE` | `=1` | Keeps imports from writing `.pyc` into the read-only Iatronix tree. |
+| `MODEL_DEEP` | no | Deep-reasoning model for hypothesize + experiment-design. Defaults to the Sonnet reasoning tier; `run_http.sh` sets `claude-opus-4-8`. Set `=claude-sonnet-4-6` to run without Opus. |
+| `PROVIDERS_CONFIG_PATH` | no | Points the LLM provider registry at `config/providers.yaml` (Anthropic Haiku/Sonnet/Opus). Set when `MODEL_DEEP` uses Opus (`run_http.sh` does this). |
 
 ---
 
@@ -421,9 +420,9 @@ transbench/
 
 Complete and shipped. `generate_experiment` returns a grounded, cited `TransBrief` whose
 `top_experiment` is a runnable single-cell analysis naming a content-verified, resolvable dataset
-with a `claude_science_prompt`; the MCP server serves it over stdio (Claude Science) and HTTP; the
-pipeline is domain-universal; the Iatronix baseline-diff guard shows no new delta. Claude Science
-actually *executing* a prompt is a demo-day path (the beta app, external to this repo), with the
-HTTP + manual-paste fallbacks above.
+with a `claude_science_prompt`; the MCP server serves it over streamable-HTTP (what Claude Science
+connects to, via a private https tunnel) and stdio (direct clients); the pipeline is domain-universal;
+the Iatronix baseline-diff guard shows no new delta. Claude Science actually *executing* a prompt is a
+demo-day path (the beta app, external to this repo), with the local `ask.sh` + manual-paste fallback above.
 
 > **Research hypothesis generation only. Not clinical, diagnostic, or prescribing advice.**
