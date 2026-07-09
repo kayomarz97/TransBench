@@ -45,7 +45,7 @@ from typing import Any
 
 import pytest
 
-from tests.fixtures import FLAGSHIP_OBSERVATION
+from tests.fixtures import FLAGSHIP_OBSERVATION, METABOLIC_OBSERVATION
 from transbench import agents, engine
 from transbench.reuse import EvidenceFetchResult
 from transbench.schemas import Hypothesis, TransBrief
@@ -185,6 +185,40 @@ def test_golden_mode_invalid_json_falls_back_to_live(monkeypatch: pytest.MonkeyP
     result = asyncio.run(engine.run_transbench(FLAGSHIP_OBSERVATION))
 
     assert result is sentinel
+
+
+def test_golden_mode_autoselects_matching_domain_golden_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Multi-golden auto-select (the NEW candidate policy): with
+    TRANSBENCH_GOLDEN_BRIEF UNSET, golden mode scans every committed
+    ``snapshots/*_golden_brief.json`` and serves the one whose ``request_echo``
+    matches -- here a NON-flagship domain (type 2 diabetes), proving domains
+    beyond the flagship auto-select with zero config. The live path is
+    monkeypatched to raise, so a pass proves this is a pure zero-network
+    replay of the domain golden, not a live run (and not the flagship golden,
+    which is tried FIRST but must not match a diabetes observation)."""
+    monkeypatch.setenv("TRANSBENCH_MODE", "golden")
+    monkeypatch.delenv("TRANSBENCH_GOLDEN_BRIEF", raising=False)
+    monkeypatch.setattr(engine, "run_transbench_graph", _boom)
+
+    result = asyncio.run(engine.run_transbench(METABOLIC_OBSERVATION))
+
+    assert engine._normalize_for_match(result.request_echo) == engine._normalize_for_match(METABOLIC_OBSERVATION)
+    assert "diabetes" in result.request_echo.lower()  # the diabetes golden, not the flagship (tried first)
+
+
+def test_golden_brief_candidates_scans_dir_when_unset_but_honors_explicit_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The candidate policy itself: UNSET -> multiple committed goldens with
+    the flagship deterministically first; EXPLICIT env -> exactly that one
+    file (legacy single-file behavior preserved, never widened to a scan)."""
+    monkeypatch.delenv("TRANSBENCH_GOLDEN_BRIEF", raising=False)
+    names = [p.name for p in engine._golden_brief_candidates()]
+    assert names and names[0] == "flagship_golden_brief.json", "flagship must be tried first, stable order"
+    assert len(names) >= 2, "expected the bundled per-domain goldens to be auto-discovered when env is unset"
+
+    monkeypatch.setenv("TRANSBENCH_GOLDEN_BRIEF", "snapshots/metabolic_t2d_golden_brief.json")
+    assert [p.name for p in engine._golden_brief_candidates()] == ["metabolic_t2d_golden_brief.json"]
 
 
 # ---------------------------------------------------------------------------

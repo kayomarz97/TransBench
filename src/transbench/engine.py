@@ -83,7 +83,10 @@ logger = logging.getLogger(__name__)
 # Path env vars (both optional; a relative path resolves against this repo's
 # own root, `config.REPO_ROOT` -- the same resolution `config.py` itself uses
 # for `.env`):
-#   TRANSBENCH_GOLDEN_BRIEF        (default "snapshots/flagship_golden_brief.json")
+#   TRANSBENCH_GOLDEN_BRIEF        (optional EXPLICIT override of the single golden file; when UNSET,
+#                                   golden mode auto-selects among every snapshots/*_golden_brief.json by
+#                                   matching request_echo, so per-domain goldens drop in with zero config
+#                                   -- see _golden_brief_candidates below)
 #   TRANSBENCH_RETRIEVAL_SNAPSHOT  (default "snapshots/flagship_retrieval_snapshot.json")
 #
 # Works through the MCP tools automatically: `mcp_server/server.py` calls
@@ -124,50 +127,89 @@ def _golden_brief_path() -> Path:
     return _resolve_repo_path("TRANSBENCH_GOLDEN_BRIEF", "snapshots/flagship_golden_brief.json")
 
 
+def _golden_brief_candidates() -> list[Path]:
+    """The golden-brief file(s) ``golden`` mode will try, in priority order.
+
+    - If ``TRANSBENCH_GOLDEN_BRIEF`` is explicitly set, that single file is the
+      ONLY candidate -- an explicit override stays authoritative and is never
+      silently widened to a directory scan (unchanged legacy behavior; every
+      existing single-file test keeps its exact semantics).
+    - Otherwise (the default), every ``snapshots/*_golden_brief.json`` is a
+      candidate, so any number of per-domain goldens can be dropped in and
+      auto-selected purely by their own ``request_echo`` with ZERO config
+      (scales to new domains without touching code). The flagship file is
+      tried first for a stable, deterministic order; the rest follow sorted by
+      filename. Widening the candidate SET never weakens the per-candidate
+      ``request_echo`` safety guard in :func:`_try_load_golden_brief` -- each
+      candidate must still match the caller's observation before it is served.
+    """
+    if os.environ.get("TRANSBENCH_GOLDEN_BRIEF"):
+        return [_golden_brief_path()]
+    snapshots_dir = config.REPO_ROOT / "snapshots"
+    flagship = snapshots_dir / "flagship_golden_brief.json"
+    candidates: list[Path] = [flagship] if flagship.exists() else []
+    if snapshots_dir.is_dir():
+        for path in sorted(snapshots_dir.glob("*_golden_brief.json")):
+            if path != flagship:
+                candidates.append(path)
+    return candidates
+
+
 def _retrieval_snapshot_path() -> Path:
     return _resolve_repo_path("TRANSBENCH_RETRIEVAL_SNAPSHOT", "snapshots/flagship_retrieval_snapshot.json")
 
 
 def _try_load_golden_brief(observation: str) -> Optional[TransBrief]:
-    """``TRANSBENCH_MODE=golden``'s safety-guarded loader. Returns the
-    parsed, schema-validated ``TransBrief`` iff the golden-brief file exists,
-    parses as JSON, validates against ``TransBrief``, AND its own
-    ``request_echo`` matches ``observation`` (normalized via
-    :func:`_normalize_for_match`). Returns ``None`` on ANY failure — missing
-    file, unparseable/invalid JSON, a schema mismatch, or a genuinely
-    different observation — NEVER raises, and always logs a clear,
-    specific reason first, so the caller's documented behavior ("fall back
-    to the live pipeline") is always safe to take unconditionally on a
-    ``None`` return. This is the one function responsible for guaranteeing
-    ``golden`` mode can never serve a brief for the wrong question.
+    """``TRANSBENCH_MODE=golden``'s safety-guarded loader. Walks the candidate
+    golden files (:func:`_golden_brief_candidates` -- one explicit file, or
+    every ``snapshots/*_golden_brief.json`` when unset) in priority order and
+    returns the FIRST one that exists, parses as JSON, validates against
+    ``TransBrief``, AND whose own ``request_echo`` matches ``observation``
+    (normalized via :func:`_normalize_for_match`). Returns ``None`` if NO
+    candidate matches — no files, all unparseable/invalid, or a genuinely
+    different observation than every candidate — NEVER raises, and always logs
+    a clear, specific reason first, so the caller's documented behavior ("fall
+    back to the live pipeline") is always safe to take unconditionally on a
+    ``None`` return. A single bad candidate (missing/invalid) is skipped, not
+    fatal — a later candidate can still match. This is the one function
+    responsible for guaranteeing ``golden`` mode can never serve a brief for
+    the wrong question, no matter how many domain goldens are bundled.
     """
-    path = _golden_brief_path()
-    if not path.exists():
+    candidates = _golden_brief_candidates()
+    if not candidates:
         logger.warning(
-            "TRANSBENCH_MODE=golden: no golden brief file at %s -- falling back to the live pipeline.",
-            path,
+            "TRANSBENCH_MODE=golden: no golden brief file(s) found -- falling back to the live pipeline.",
         )
         return None
-    try:
-        raw = json.loads(path.read_text())
-        brief = TransBrief.model_validate(raw)
-    except Exception:
-        logger.exception(
-            "TRANSBENCH_MODE=golden: failed to load/validate the golden brief at %s -- "
-            "falling back to the live pipeline.",
-            path,
-        )
-        return None
-    if _normalize_for_match(brief.request_echo) != _normalize_for_match(observation):
-        logger.warning(
-            "TRANSBENCH_MODE=golden: observation does not match the golden brief's own "
-            "request_echo (safety guard against serving a mismatched brief) -- falling back "
-            "to the live pipeline instead. golden_file=%s",
-            path,
-        )
-        return None
-    logger.info("TRANSBENCH_MODE=golden: observation matches -- serving the golden brief verbatim from %s.", path)
-    return brief
+    target = _normalize_for_match(observation)
+    tried: list[str] = []
+    for path in candidates:
+        if not path.exists():
+            tried.append(f"{path.name} (missing)")
+            continue
+        try:
+            brief = TransBrief.model_validate(json.loads(path.read_text()))
+        except Exception:
+            logger.exception(
+                "TRANSBENCH_MODE=golden: failed to load/validate the golden brief at %s -- skipping this candidate.",
+                path,
+            )
+            tried.append(f"{path.name} (invalid)")
+            continue
+        if _normalize_for_match(brief.request_echo) == target:
+            logger.info(
+                "TRANSBENCH_MODE=golden: observation matches -- serving the golden brief verbatim from %s.",
+                path,
+            )
+            return brief
+        tried.append(f"{path.name} (request_echo mismatch)")
+    logger.warning(
+        "TRANSBENCH_MODE=golden: observation matched none of %d candidate golden brief(s) [%s] -- "
+        "falling back to the live pipeline instead (this mode can never serve a mismatched brief).",
+        len(candidates),
+        ", ".join(tried),
+    )
+    return None
 
 
 def _load_bundled_retrieval_snapshot() -> Optional[dict]:

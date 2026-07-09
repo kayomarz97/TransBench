@@ -1,357 +1,395 @@
 # TransBench
 
-A translational clinician↔bench research agent, shipped as an MCP connector
-for Claude Science. A clinician pastes a free-text observation about **any**
-clinical or biomedical phenomenon — any disease, drug, or mechanism, not a
-single fixed disease area — and TransBench decomposes it into the biological
-axes that observation itself motivates, generates up to 3 falsifiable
-mechanistic hypotheses, grounds each in retrieved PubMed evidence (support
-**and** contradiction), applies a novelty guard so textbook facts are never
-shipped as "novel", and designs one reproducible computational experiment —
-naming a concrete, resolvable public dataset — ready to hand to Claude
-Science. The flagship demo below happens to be about resistant hypertension,
-but the pipeline itself is domain-universal: the same 8 agents ground a
-rheumatoid-arthritis, melanoma, recurrent-*C. difficile*, or type-2-diabetes
-observation exactly the same way, each anchored on *its own* condition (see
-[Domain-universal, not hypertension-only](#domain-universal-not-hypertension-only)).
+**A translational research agent that turns a clinician's bedside observation into a
+grounded, testable, bench-ready experiment — shipped as an MCP connector for Claude Science.**
 
-> **Research tool only.** TransBench never emits diagnosis, drug selection,
-> or dosing guidance. Every response carries a fixed disclaimer:
-> *"Research hypothesis generation only. Not clinical, diagnostic, or
-> prescribing advice."*
+You describe something you saw in a patient, in plain words. TransBench breaks it into the
+biological mechanisms that could explain it, generates falsifiable hypotheses, **checks each one
+against the real published literature**, throws out the textbook facts and the unsupported guesses,
+and — for whatever survives — hands you *one runnable computational experiment* with a concrete
+public dataset and a paste-ready prompt for Claude Science.
 
-This is a **standalone repository**. It reuses the mature grounding/retrieval
-stack from the [Iatronix](../med-ai-project) backend as a **read-only**
-dependency and never modifies it — see [Reusing Iatronix](#reusing-iatronix-read-only) below.
+It works for **any** disease, drug, or mechanism — not one fixed specialty. The examples below span
+type 2 diabetes, resistant hypertension, melanoma, and rheumatoid arthritis, and the same pipeline
+handles whatever you paste in.
+
+> [!IMPORTANT]
+> **Research tool only.** TransBench never gives diagnosis, drug selection, or dosing advice. Every
+> response carries a fixed disclaimer: *"Research hypothesis generation only. Not clinical,
+> diagnostic, or prescribing advice."*
+
+> [!NOTE]
+> **Nothing in this README is mocked-up.** Every screenshot, PMID, count, and experiment is read
+> straight from real captured runs committed in [`snapshots/`](snapshots/). The images are generated
+> from those files by [`docs/generate_readme_assets.py`](docs/generate_readme_assets.py). Anyone can
+> reproduce them **byte-identical, with no API key** — see [Reproducibility](#reproducibility--no-fake-data).
 
 ---
 
-## Install
+## Contents
 
-Requires **Python ≥3.11** (the reused Iatronix backend declares
-`requires-python = ">=3.11"`) and [`uv`](https://docs.astral.sh/uv/).
+- [For clinicians — what it does and why it matters](#for-clinicians--what-it-does-and-why-it-matters)
+- [How it works](#how-it-works)
+- [Without vs. with TransBench](#without-vs-with-transbench)
+- [See it in action](#see-it-in-action)
+- [Real-world use cases](#real-world-use-cases)
+- [For engineers — architecture & internals](#for-engineers--architecture--internals)
+- [Install](#install)
+- [Run the MCP server & register in Claude Science](#run-the-mcp-server--register-in-claude-science)
+- [Modes: live · snapshot · golden](#modes-live--snapshot--golden)
+- [Reproducibility — no fake data](#reproducibility--no-fake-data)
+- [Reusing Iatronix, read-only](#reusing-iatronix-read-only)
+- [Tests](#tests)
+- [Repo layout](#repo-layout)
+- [Scope, safety, and status](#scope-safety-and-status)
 
-```bash
-cd /root/projects/transbench
+---
 
-# 1. Create the venv (the host's default `python3` may be 3.10 — too old).
-uv venv --python 3.12
+## For clinicians — what it does and why it matters
 
-# 2. Install the Iatronix backend read-only, editable, and WITHOUT its full
-#    dependency tree (--no-deps): only DB-free leaf functions are reused, so
-#    asyncpg/pgvector/redis/firebase-admin/boto3/sentry/etc. are never pulled in.
-uv pip install -e /root/projects/med-ai-project/backend --no-deps
+**The gap it closes.** Every clinic day produces observations that don't fit the guideline —
+a patient who doesn't respond to a first-line drug, an unexpected lab, a pattern you can't explain.
+Turning that spark into a *testable bench question* normally means days of literature review and a
+conversation with a computational biologist. Most sparks never make that trip.
 
-# 3. Install the curated, lean dependency set the reused leaves actually need
-#    (fastapi is required — llm_factory/stance_neutralizer import
-#    fastapi.HTTPException):
-uv pip install mcp langgraph langchain langchain-anthropic langchain-core \
-    anthropic httpx "pydantic>=2" pydantic-settings pyyaml fastapi \
-    json-repair tenacity python-dotenv
+**What TransBench does, in three steps:**
 
-# 4. Editable self-install of this package (src/transbench/).
-uv pip install -e .
+1. **You paste an observation** in plain clinical shorthand — e.g.
+   *"52F, rheumatoid arthritis, inadequate response to methotrexate at max dose; persistent
+   synovitis; anti-CCP positive."*
+2. **It returns a brief.** Candidate mechanisms, each labelled by *how much real published evidence
+   actually backs it* (with clickable PubMed / ClinicalTrials.gov citations), textbook facts flagged
+   as "established" (so they're not dressed up as discoveries), and unsupported guesses demoted.
+3. **It hands you an experiment.** If a mechanism is both a genuine open question *and* grounded in
+   evidence, you get one runnable computational experiment — a named public dataset, an ordered
+   protocol, explicit "confirms if / refutes if" criteria, and a prompt you paste straight into
+   Claude Science to produce a figure.
 
-# 5. Test tooling (not part of the runtime dependency set above).
-uv pip install pytest pytest-asyncio
+**Why it's trustworthy.** The single most important behavior: **when the evidence isn't there,
+TransBench says so and ships nothing, rather than inventing a plausible-sounding answer.** In the
+four real runs shown below, it produced experiments for two domains and *deliberately declined* for
+two — because no hypothesis cleared the evidence bar. That refusal is the feature.
+
+---
+
+## How it works
+
+A clinician's sentence goes in; a grounded, testable brief comes out. Eight cooperating agents do
+the work, with three hard quality gates in the middle that anything unsupported cannot pass.
+
+```mermaid
+flowchart TD
+    A["🧑‍⚕️ Clinician observation<br/>free text · any disease, drug, mechanism"] --> B["1 · Decompose<br/>biological axes + condition anchor"]
+    B --> C["2 · Hypothesize<br/>≤ 3 falsifiable mechanisms"]
+    C --> D["3 · Retrieve · no LLM<br/>real PubMed + trials<br/>support & contradiction passes"]
+    D --> E["4 · Grade<br/>map each source → supports / refutes + evidence grade"]
+    E --> F{"5–6 · Rigor gates"}
+    F --> G["Entailment<br/>does the source <i>actually</i> support the claim?"]
+    F --> H["Grounding gate<br/>no resolvable citation → dropped"]
+    F --> I["Novelty guard<br/>textbook fact → demoted, never shipped as novel"]
+    G --> J{"Any hypothesis<br/>open_question <b>and</b> grounded?"}
+    H --> J
+    I --> J
+    J -- yes --> K["7 · Design experiment<br/>named, <b>content-verified</b> dataset<br/>+ ordered runnable protocol"]
+    J -- no --> L["No experiment shipped<br/>honest refusal, not a fabrication"]
+    K --> M["8 · Assemble TransBrief"]
+    L --> M
+    M --> N["📋 TransBrief<br/>axes · graded hypotheses · references<br/>top_experiment · claude_science_prompt"]
+    N --> O["🔬 Paste into Claude Science<br/>→ reproducible figure"]
 ```
 
-Verified installed footprint (no DB/cloud packages leaked in):
-`iatronix-backend 0.1.0` (editable, from `/root/projects/med-ai-project/backend`),
-`transbench 0.1.0` (editable, this repo), `mcp 1.28.1`, `langgraph`,
-`langchain`/`langchain-anthropic`, `anthropic`, `fastapi`, `pydantic>=2`,
-`pydantic-settings`, `pyyaml`, `json-repair`, `tenacity`, `python-dotenv`,
-`httpx`. See `PLAN.md` (Phase 0) for the full path-decision writeup and
-`pyproject.toml` for the frozen dependency list (`iatronix-backend` is
-declared there too, resolved via `[tool.uv.sources]` as an editable path
-dependency).
-
-### `.env`
-
-Copy `.env.example` to `.env` and fill in your own keys — **never commit
-real keys** (`.env` is already gitignored):
-
-```bash
-cp .env.example .env
-```
-
-| Key | Required | Purpose |
+| Stage | Agent | Does |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | yes | BYOK key for the **engine's own** Anthropic calls (`create_llm(..., user_key=...)`). Independent of Claude Science, which is only this tool's MCP *client* — it never sees this key. No fallback key exists; without it every LLM-calling agent fails cleanly. |
-| `PUBMED_API_KEY` | no | Raises NCBI/PubMed rate limits. |
-| `LLM_TEMPERATURE` | yes (`=0`) | Forces deterministic LLM clients. `create_llm` has no `temperature` kwarg — it builds clients at `settings.llm_temperature`, read from this env var (belt 1 of 2; belt 2 is `.bind(temperature=0)` on every client in `agents.py`). |
-| `PYTHONDONTWRITEBYTECODE` | yes (`=1`) | Prevents Python from writing `.pyc`/`__pycache__` during imports, so importing the editable-installed Iatronix backend never writes into its (read-only) tree. Set this in your shell/process env for **every** TransBench invocation (tests, the engine, the MCP server), not only in `.env` — a few entry points read it before `.env` would even be loaded. |
-
-No other environment variable is required at import time — every field of
-Iatronix's own `Settings` has a default (verified in Phase 0/Phase −1), so
-`DATABASE_URL`/`REDIS_URL`/`ENCRYPTION_KEY`/etc. are never needed.
-
----
-
-## Running the MCP server
-
-```bash
-# stdio -- what Claude Science actually spawns (see below)
-bash mcp_server/run_stdio.sh
-
-# HTTP fallback (streamable-http), localhost:8500
-bash mcp_server/run_http.sh
-```
-
-Both scripts `cd` into the repo root, export `PYTHONDONTWRITEBYTECODE=1` +
-`PYTHONPATH=<repo>/src`, and select the transport via `MCP_TRANSPORT`. Two
-tools are exposed, both calling `transbench.engine.run_transbench` directly
-(no duplicated retrieval/grounding logic):
-
-- **`generate_experiment(observation, focus_drug="")`** — the showpiece.
-  Returns a schema-valid `TransBrief`: decomposed axes, up to 3 graded
-  hypotheses with real PubMed citations and an auditable novelty verdict,
-  and `top_experiment` — one runnable computational experiment naming a
-  concrete, resolvable dataset plus a `claude_science_prompt`.
-- **`search_grounded_evidence(question)`** — utility/fallback. The *same*
-  engine run, reshaped into a lighter grounded-evidence-only projection.
-
-See `mcp_server/README.md` for SDK/transport details, the error-response
-shape, and per-call cost notes (~13 LLM calls + live PubMed + a live GEO
-content-verification fetch per invocation).
-
-### Registering in Claude Science
-
-Full walkthrough (SSH-tunnel-from-Windows-laptop-to-headless-Linux-server
-setup, connector registration, demo script, fallback plan):
-**[`CLAUDE_SCIENCE_SETUP.md`](CLAUDE_SCIENCE_SETUP.md)**. Connector-specific
-registration details (the exact `mcpServers` JSON block, prerequisites,
-manual/HTTP fallback) also live in **[`mcp_server/README.md`](mcp_server/README.md)**.
-In short: TransBench registers as a local **stdio** MCP server whose
-`command` is this repo's **own venv** Python
-(`/root/projects/transbench/.venv/bin/python -m mcp_server.server`, `cwd`
-= this repo root, `PYTHONDONTWRITEBYTECODE=1` set in the connector's own
-`env` block) — that venv is what has `mcp`/`langgraph`/`langchain-anthropic`
-and the read-only editable-installed Iatronix backend all resolvable
-together.
+| 1 | Decompose | Splits the observation into biological axes and extracts its own disease anchor (used as the real PubMed search term — so retrieval stays on-topic for *any* domain). |
+| 2 | Hypothesize | Writes up to 3 falsifiable mechanistic hypotheses, each naming specific molecules/cells/pathways and a testable prediction. |
+| 3 | Retrieve | **No LLM.** Pulls real PubMed + ClinicalTrials.gov abstracts, with a dedicated contradiction pass, per hypothesis. |
+| 4 | Grade | Maps each retrieved source to *supports / refutes* + an evidence grade, and attaches a resolvable citation. |
+| 5–6 | Rigor gates | Entailment (does the source really support it?), grounding (drop anything with no resolvable citation), novelty (demote textbook facts). |
+| 7 | Design | Only for a hypothesis that is **both** an open question **and** grounded: one computational experiment on a **content-verified** dataset. |
+| 8 | Assemble | Packs everything into a schema-valid `TransBrief` with a full run manifest. |
 
 ---
 
-## The flagship demo
+## Without vs. with TransBench
 
-Input (a real, unresolved area in resistant-hypertension research — the
-agent grounds real PMIDs at runtime, never hardcoded citations):
+A general-purpose chatbot will happily answer *any* mechanistic question — confidently, with
+citations that look real, a "novel" mechanism that's actually in every textbook, and a dataset
+accession that may not exist. TransBench is built to make each of those failure modes impossible.
+The numbers below are counted from the four real runs in [`snapshots/`](snapshots/):
 
-> *"58F, resistant hypertension despite ACEi + CCB + thiazide at max dose;
-> elevated hs-CRP; poor response to RAAS blockade."*
+<img src="docs/img/without-with.svg" alt="Side-by-side: a plain LLM fabricates citations, reframes textbook facts as novel, and names datasets that may not exist; TransBench grounds every citation, demotes established claims, content-verifies datasets, and refuses to ship when nothing clears the bar. Scoreboard: 4 real domains, 2 experiments shipped, 2 correctly gated out, 2 unverifiable datasets caught, 0 fabricated citations." width="820">
 
-Call `generate_experiment` with that observation (via Claude Science, the
-HTTP fallback, or directly in Python — see below). It returns a grounded
-`TransBrief` whose `axes` include `immune_inflammatory` (elevated hs-CRP +
-resistant hypertension), up to 3 falsifiable hypotheses each graded against
-real retrieved evidence, and a `top_experiment` naming a concrete dataset
-(a disease-matched GEO series when the model's own proposal is
-independently re-verified to actually match its claimed content — not just
-that the accession *resolves* — or the pinned, guaranteed-resolvable Tabula
-Sapiens immune/kidney compartment otherwise) with an ordered protocol and a
-`top_experiment.claude_science_prompt` ready to run in Claude Science to
-produce a reproducible figure.
+| | Plain LLM (no connector) | **TransBench connector** |
+|---|---|---|
+| **Citations** | Plausible-looking PMIDs, often fabricated | Every citation is a real, resolvable record — or the claim is dropped |
+| **Novelty** | Reframes textbook facts as "novel" | `established` claims demoted; only open questions promoted |
+| **Datasets** | Names an accession that may not exist / be a different study | **Verifies each proposed accession** against the real record; rejects & replaces if it can't |
+| **When ungrounded** | Answers anyway, confidently | **Ships nothing** — an honest refusal |
+| **Reproducible** | New answer every time | `TRANSBENCH_MODE=golden` replays byte-identical, keyless |
 
-A real captured run of this exact observation (Phase 7 QA): 3 hypotheses
-(aldosterone-breakthrough/chymase, CD8⁺ effector-memory T-cell/eNOS/NOX2,
-and a SLC12A3/WNK1/ENaC pharmacogenomic axis), 13 LLM calls total, 29
-deduplicated references, and a fully-specified scRNA-seq co-expression
-protocol against the Tabula Sapiens kidney compartment for the selected
-hypothesis (its own model-proposed GEO accession was caught by the
-dataset-content-verification gate as a real-but-unrelated record and
-correctly rejected before ever reaching the final plan).
-
-## Domain-universal, not hypertension-only
-
-TransBench is not hardcoded to hypertension or antihypertensive drugs — that
-was the flagship demo's *topic*, not the engine's scope. Two things make any
-clinical/biomedical domain work the same way:
-
-1. **Decomposer-extracted `condition_anchor`.** Agent 1 (the Decomposer)
-   reads the observation and returns both its biological axes AND the
-   observation's own primary disease/condition in plain words (e.g.
-   `"rheumatoid arthritis"`, `"melanoma"`, `"type 2 diabetes"`) — this is
-   threaded through the graph as the real PubMed retrieval anchor for every
-   hypothesis generated from that observation, replacing an earlier
-   hardcoded-to-"hypertension" default. A run's resolved anchor is recorded
-   in `run_manifest["condition_anchor"]` for auditability.
-2. **Free-form biological axes.** `axes` are short, LLM-chosen snake_case
-   labels (e.g. `immune_inflammatory_th17`, `tumor_microenvironment`,
-   `host_pathogen_interaction`) rather than a fixed list authored for one
-   disease area — any domain names its own relevant mechanism axes.
-
-Proof (`tests/test_universal_domains.py`, run live against
-`tests/fixtures.AUTOIMMUNE_OBSERVATION` — a rheumatoid-arthritis/
-methotrexate-inadequate-response case, and the PROVEN regression: before
-this fix, this exact scenario's queries were built as e.g. "hypertension
-Th17 Methotrexate," grounding zero real evidence): the built PubMed query
-for every hypothesis contains `"rheumatoid arthritis"`, never
-`"hypertension"` — e.g. `condition_anchor` resolves to `"rheumatoid
-arthritis"` and the query for a methotrexate-pharmacokinetic-resistance
-hypothesis is `"rheumatoid arthritis RFC1 Upregulation"` — and retrieval
-grounds real, on-topic RA literature: PMID 22971639, *"the G80A polymorphism
-of the reduced folate carrier 1 gene (RFC1) [is associated with] MTX
-efficacy,"* directly on-topic for that hypothesis. Three more standalone
-cross-domain fixtures ship in `tests/fixtures.py` for the same proof in
-oncology (`ONCOLOGY_OBSERVATION` — melanoma/checkpoint-inhibitor resistance;
-anchors on `"metastatic melanoma"`, e.g. query `"metastatic melanoma TIM
-expression"`),
-infectious disease (`INFECTIOUS_OBSERVATION` — recurrent *C. difficile*;
-anchors on `"recurrent Clostridioides difficile infection"`, surfacing a
-directly-relevant fecal-microbiota-transplant paper), and metabolic/
-endocrine (`METABOLIC_OBSERVATION` — T2D on metformin; anchors on `"type 2
-diabetes"`, e.g. query `"type 2 diabetes GLP fasting"` surfacing *"HRS-7535
-for Type 2 Diabetes Inadequately Controlled With Metformin"* — matching the
-fixture's own scenario almost verbatim). None of the four ever anchors on
-"hypertension".
-
-Honest scope note: "universal" means any clinical/biomedical observation —
-this is still a PubMed + single-cell-atlas research tool, not a general
--purpose non-medical query engine. Some domains legitimately have sparser
-PubMed grounding for a freshly-generated, genuinely novel hypothesis than a
-well-studied area like hypertension — the same grounding gate and novelty
-guard that already demote (never fabricate for) a sparse hypothesis in the
-flagship domain apply identically everywhere else.
-
-### Manual-paste fallback
-
-If the live connector misbehaves during a demo, the payoff is one paste away
-regardless:
-
-1. `bash mcp_server/run_http.sh` (or run the engine directly, see below).
-2. Call `generate_experiment` over HTTP, or in a Python shell:
-   ```python
-   import asyncio
-   from transbench.engine import run_transbench
-   brief = asyncio.run(run_transbench("<your observation>"))
-   print(brief.top_experiment.claude_science_prompt)
-   ```
-3. **Paste `top_experiment.claude_science_prompt` directly into a Claude
-   Science chat** — same reproducible-figure payoff, zero dependency on the
-   live connector working.
+The **2 unverifiable datasets caught** are real, and the gate rejects for different reasons: in the
+hypertension run the model proposed a GEO accession, the gate fetched the actual record and found it
+was a *kidney-transplant chimerism* study — wrong content — and rejected it; in the diabetes run the
+proposed pointer wasn't even a well-formed reference to a public dataset host. Both fell back to a
+pinned, guaranteed-resolvable atlas, recorded transparently in the brief's `feasibility_notes`.
 
 ---
 
-## Deterministic demo / snapshot mode
+## See it in action
 
-`TRANSBENCH_MODE` is an optional env var that toggles how `run_transbench`
-sources its output — read directly off the process env inside
-`transbench.engine.run_transbench` itself, so it applies to **every**
-caller, including the MCP tools (`generate_experiment`/
-`search_grounded_evidence`), with zero code changes anywhere else:
+Real, live-captured output for a **type 2 diabetes** observation — every field below is served
+verbatim from [`snapshots/metabolic_t2d_golden_brief.json`](snapshots/metabolic_t2d_golden_brief.json):
 
-| `TRANSBENCH_MODE` | Behavior |
-|---|---|
-| `live` (default, or unset) | The normal full 8-agent pipeline — completely unchanged. |
-| `golden` | Returns a pre-captured, complete `TransBrief` **verbatim**, instead of running the pipeline at all — for a fully deterministic demo replay. |
-| `snapshot` | Runs the **real** pipeline (real decompose/hypothesize/grade/entailment/novelty/design/assemble LLM calls) but replays PubMed retrieval from a bundled snapshot instead of hitting PubMed live — fixed evidence, live LLM reasoning on top of it. |
+<img src="docs/img/in-action-t2d.svg" alt="TransBench generate_experiment output for a type 2 diabetes observation: four decomposed axes, three hypotheses (H2 grounded with PMIDs 37546319 and 39422716, H1 and H3 demoted as ungrounded), a top experiment on OCT1/OCT3 hepatocyte expression in Tabula Sapiens with a 14-step protocol, and a paste-ready claude_science_prompt. 17 references, temperature 0." width="820">
 
-Two optional path env vars point at the bundled files (a relative path
-resolves against the repo root; both already have working defaults, checked
-into `snapshots/`):
+*(The experiment targets hepatocytes; Tabula Sapiens is a whole-body atlas, so the single download
+named in the prompt includes the liver/hepatocyte cells — `(immune compartment)` is just the pinned
+fallback's default label.)*
 
-| Env var | Default |
-|---|---|
-| `TRANSBENCH_GOLDEN_BRIEF` | `snapshots/flagship_golden_brief.json` |
-| `TRANSBENCH_RETRIEVAL_SNAPSHOT` | `snapshots/flagship_retrieval_snapshot.json` |
-
-**Safety guards — neither mode can silently serve the wrong content:**
-
-- `golden` mode returns the golden brief only if the caller's `observation`
-  matches the golden brief's own `request_echo` (normalized:
-  strip/lower/collapse-whitespace). A mismatch — or a missing/invalid golden
-  file — logs a clear warning and transparently falls back to running the
-  live pipeline instead.
-- `snapshot` mode's replay is keyed by hypothesis id **and** guarded by the
-  hypothesis's own `statement`: each bundled snapshot entry also stores the
-  exact hypothesis statement it was captured for, and a given hypothesis's
-  evidence is only replayed if the *current* run's hypothesis statement
-  matches (normalized) — otherwise that one hypothesis transparently falls
-  back to live PubMed retrieval (logged), so a fresh hypothesis that happens
-  to reuse an old id can never be served evidence captured for a different
-  hypothesis. (This is the same underlying `retrieval_snapshot` replay
-  mechanism `TransRequest.retrieval_snapshot` has used since Phase 5 —
-  BUILD_SPEC.md §9 — now with this extra statement-match guard layered on
-  top of the original id-only keying.)
-
-Usage — via the engine directly:
+Reproduce it yourself in seconds — **no API key needed** (golden mode replays the committed brief):
 
 ```bash
 TRANSBENCH_MODE=golden PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "
 import asyncio
 from transbench.engine import run_transbench
 brief = asyncio.run(run_transbench(
-    '58F, resistant hypertension despite ACEi + CCB + thiazide at max dose; '
-    'elevated hs-CRP; poor response to RAAS blockade.'
-))
+    '49M, type 2 diabetes with persistent postprandial hyperglycemia despite metformin at '
+    'maximal dose and confirmed adherence; elevated fasting glucagon; blunted GLP-1 response '
+    'to mixed-meal testing.'))
 print(brief.top_experiment.claude_science_prompt)
 "
 ```
 
-Or via the MCP connector — set `TRANSBENCH_MODE` (and, if needed, the two
-path env vars above) in the connector's own registration `env` block
-alongside `ANTHROPIC_API_KEY`/`PYTHONDONTWRITEBYTECODE` (see
-[`mcp_server/README.md`](mcp_server/README.md)'s register-block JSON) —
-`generate_experiment`/`search_grounded_evidence` pick it up automatically,
-no other change required.
-
-The two bundled files under `snapshots/` were captured from one real,
-live flagship run (`fixtures.FLAGSHIP_OBSERVATION`) and contain only public
-PubMed metadata plus the generated brief itself — no API keys or secrets.
+The same command works for **resistant hypertension**, **melanoma**, and **rheumatoid arthritis** —
+golden mode auto-selects the matching committed brief by the observation text (see
+[Modes](#modes-live--snapshot--golden)). Melanoma and RA return **no experiment** on purpose: no
+hypothesis cleared the grounding bar, so the tool declined rather than fabricate one.
 
 ---
 
-## Reusing Iatronix (read-only)
+## Real-world use cases
 
-TransBench never edits Iatronix. It only imports **DB-free leaf functions**
-(`fetch_evidence_data`, `fetch_drug_data`, `rank_article_list`,
-`build_article_registry`, `grounding_stats`/`strip_ungrounded`,
-`has_minimum_evidence`/`ensure_evidence`, `validate_citations`,
-`create_llm`, `neutralize_query`) via the single seam `src/transbench/reuse.py`
-— never `run_search_graph`, `semantic_cache`, or `vector_search` (those need
-pgvector/redis). The Iatronix backend is installed **editable** into this
-repo's own venv (`uv pip install -e <IATRONIX>/backend --no-deps`), so
-`from app.services... import ...` resolves to the live, read-only source
-tree — nothing is ever written there. This is enforced by a **baseline-diff**
-guard (`tests/test_iatronix_untouched.py`, run under
-`PYTHONDONTWRITEBYTECODE=1`): it snapshots `git -C <IATRONIX_PATH> status
---porcelain` at the true start of every test session and hard-fails on any
-new delta (not an absolute-empty assertion — Iatronix legitimately carries
-unrelated untracked files). Verified clean across every phase of this build,
-including every live pipeline run made during Phase 7 QA.
+Framed as *what you'd actually do with it* — grounded in the four domains already captured here, and
+generalizable to any PubMed-covered area.
+
+- **Bench-directing a treatment non-responder.** *T2D not controlled on metformin* → TransBench
+  grounds a metformin-transporter (OCT1/OCT3) pharmacokinetic-dissociation hypothesis and returns a
+  single-cell experiment on hepatocyte transporter expression — a concrete next question for a lab,
+  not a literature dump.
+- **Explaining a paradoxical case.** *Resistant hypertension despite triple therapy* → an
+  aldosterone-independent WNK–SPAK–ENaC compensation hypothesis, grounded in real Gitelman-syndrome
+  literature (PMIDs 28003083, 25841442), with a distal-tubule co-expression experiment.
+- **Triaging what's worth studying.** *Melanoma progressing on checkpoint blockade* and
+  *methotrexate-refractory RA* → the tool retrieves the literature, finds no generated hypothesis is
+  both novel and sufficiently grounded, and **ships no experiment** — telling you the easy
+  mechanistic story isn't actually supported yet, which is itself the useful signal.
+- **A safe front door to computational biology.** The output is a `claude_science_prompt` that a
+  non-programmer clinician pastes into Claude Science to get a figure — the connector does the
+  translational-informatics legwork, with citations and refutation criteria attached.
+
+**Honest scope.** "Universal" means *any clinical/biomedical observation* — this is a PubMed +
+single-cell-atlas research tool, not a general non-medical engine. Some areas legitimately have
+sparser literature for a freshly-generated novel hypothesis; the same gates that demote a thin
+hypothesis in one domain apply identically everywhere, which is why two of four domains here
+produced no experiment.
 
 ---
 
-## Development / running the tests
+## For engineers — architecture & internals
 
-```bash
-PYTHONDONTWRITEBYTECODE=1 /root/projects/transbench/.venv/bin/python -m pytest -q tests/
+### Architecture
+
+TransBench is a **standalone repo** that reuses the mature grounding/retrieval stack of the
+**Iatronix** backend as a **read-only** dependency — it imports DB-free leaf functions and never
+modifies Iatronix (enforced by a baseline-diff guard).
+
+```mermaid
+flowchart LR
+    subgraph client["MCP client"]
+      CS["Claude Science<br/>(or HTTP / direct CLI)"]
+    end
+    subgraph tb["TransBench · this repo"]
+      MCP["mcp_server<br/>FastMCP · stdio + HTTP"]
+      ENG["engine.run_transbench<br/>8-agent LangGraph pipeline"]
+      MODE["modes<br/>live · snapshot · golden"]
+      MCP --> ENG
+      ENG -.-> MODE
+    end
+    subgraph ia["Iatronix backend · READ-ONLY"]
+      LEAF["DB-free leaf functions<br/>fetch_evidence_data · rank_article_list<br/>grounding_gate · create_llm · neutralize_query"]
+    end
+    subgraph ext["External services"]
+      PUB["PubMed /<br/>ClinicalTrials.gov"]
+      DS["GEO /<br/>Tabula Sapiens"]
+      ANTH["Anthropic API<br/>(BYOK)"]
+    end
+    CS -->|"generate_experiment(observation)"| MCP
+    ENG -->|"import · never write"| LEAF
+    LEAF --> PUB
+    ENG -->|"content-verify accession"| DS
+    ENG -->|"create_llm · temp 0"| ANTH
+    ENG -->|"TransBrief"| MCP -->|"JSON"| CS
 ```
 
-Most of the suite is fully offline/deterministic (fake-LLM doubles, pure
-functions, or real-but-free NCBI-only network calls). A handful of tests
-make real, live Anthropic + PubMed calls and skip cleanly without a working
-`ANTHROPIC_API_KEY`; these all share **one** live flagship pipeline run via
-a session-scoped fixture (`tests/conftest.py::flagship_brief`) rather than
-each independently re-running the ~13-call pipeline, so running the full
-suite costs a small, bounded number of live calls, not one per acceptance
-test. See `tests/conftest.py`'s module docstring for the full rationale.
+### The reuse seam
 
-Key test files:
+A single module, [`src/transbench/reuse.py`](src/transbench/reuse.py), imports only DB-free leaves —
+`fetch_evidence_data`, `fetch_drug_data`, `rank_article_list`, `build_article_registry`,
+`grounding_stats`/`strip_ungrounded`, `has_minimum_evidence`/`ensure_evidence`, `validate_citations`,
+`create_llm`, `neutralize_query`. It never imports `run_search_graph`, `semantic_cache`, or
+`vector_search` (those need pgvector/redis). Iatronix is installed **editable** (`uv pip install -e
+<IATRONIX>/backend --no-deps`) so `from app.services… import …` resolves to the live source tree with
+nothing written back.
 
-| File | Covers |
+### Data contract
+
+The engine returns a schema-valid `TransBrief` ([`src/transbench/schemas.py`](src/transbench/schemas.py),
+Pydantic v2): `request_echo`, `axes[]`, `hypotheses[]` (each with `evidence[]`, `supporting_count`,
+`novelty`, `grounded`, `confidence`), `top_experiment` (`dataset`, `dataset_pointer`,
+`protocol_steps[]`, `confirm_if`, `refute_if`, `claude_science_prompt`), deduplicated `references[]`,
+`contradictions_surfaced[]`, `uncertainty_note`, and a `run_manifest` (models, temperature, caps,
+per-hypothesis retrieval snapshot, token spend, timestamps). `axes` are free-form normalized
+snake_case strings, so any domain names its own mechanisms.
+
+### Determinism
+
+`temperature = 0` everywhere, belt-and-suspenders: the reused `create_llm` has no temperature
+parameter (it builds at `settings.llm_temperature`), so we set `LLM_TEMPERATURE=0` in the env **and**
+`.bind(temperature=0)` on every client. `temperature=0` does not make live PubMed or the LLM
+bit-identical, so the *reproducible artifact* is the experiment (named dataset + protocol +
+`claude_science_prompt`) — and golden mode makes the whole brief exactly reproducible.
+
+### MCP server
+
+[`mcp_server/server.py`](mcp_server/server.py) is a FastMCP server (`mcp==1.28.1`) exposing two tools
+over **stdio** (what Claude Science spawns) and **streamable-HTTP** (fallback):
+
+- **`generate_experiment(observation, focus_drug="")`** — the full grounded `TransBrief`.
+- **`search_grounded_evidence(question)`** — the same engine run, reshaped into a lighter
+  grounded-evidence projection.
+
+Both call `engine.run_transbench` directly (no duplicated logic) and catch `create_llm`'s
+`fastapi.HTTPException` (missing/invalid key, bad model) to return a clean structured error.
+
+### Cost
+
+Per run ≈ 1 decompose + 1 hypothesize + 3 grade + 3 entailment + 3 novelty + 1 design + 1 assemble
+(+ ≤3 short neutralize calls) ≈ **~13 LLM calls** (Haiku for mechanical agents, Sonnet for
+reasoning), plus live PubMed and one GEO content-verification fetch. Hypotheses are capped at 3,
+abstracts at 8/hypothesis, fan-out concurrency at 3.
+
+---
+
+## Install
+
+Requires **Python ≥ 3.11** and [`uv`](https://docs.astral.sh/uv/).
+
+```bash
+cd /root/projects/transbench
+uv venv --python 3.12
+
+# Iatronix backend, read-only + editable, WITHOUT its DB/cloud dep tree:
+uv pip install -e /root/projects/med-ai-project/backend --no-deps
+
+# The curated, lean deps the reused leaves actually need:
+uv pip install mcp langgraph langchain langchain-anthropic langchain-core \
+    anthropic httpx "pydantic>=2" pydantic-settings pyyaml fastapi \
+    json-repair tenacity python-dotenv
+
+uv pip install -e .                     # this package
+uv pip install pytest pytest-asyncio    # tests
+```
+
+Copy `.env.example` to `.env` and fill in your own keys — **never commit real keys** (`.env` is
+gitignored):
+
+| Key | Required | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes (for live runs) | BYOK key for the engine's own Anthropic calls. Claude Science never sees it. Not needed for `golden` mode. |
+| `PUBMED_API_KEY` | no | Raises NCBI/PubMed rate limits. |
+| `LLM_TEMPERATURE` | `=0` | Forces deterministic clients (belt 1 of 2). |
+| `PYTHONDONTWRITEBYTECODE` | `=1` | Keeps imports from writing `.pyc` into the read-only Iatronix tree. |
+
+---
+
+## Run the MCP server & register in Claude Science
+
+```bash
+bash mcp_server/run_stdio.sh   # stdio — what Claude Science spawns
+bash mcp_server/run_http.sh    # HTTP fallback (streamable-http), localhost:8500
+```
+
+TransBench registers as a local **stdio** MCP server whose `command` is this repo's **own venv**
+Python (`/root/projects/transbench/.venv/bin/python -m mcp_server.server`, `cwd` = repo root,
+`PYTHONDONTWRITEBYTECODE=1` in the connector's `env` block). Full walkthrough:
+**[`CLAUDE_SCIENCE_SETUP.md`](CLAUDE_SCIENCE_SETUP.md)** and **[`mcp_server/README.md`](mcp_server/README.md)**.
+
+**Manual-paste fallback** (zero dependency on the live connector): run the engine, then paste
+`top_experiment.claude_science_prompt` straight into a Claude Science chat.
+
+---
+
+## Modes: live · snapshot · golden
+
+`TRANSBENCH_MODE` (read from the process env inside `run_transbench`, so it applies to every caller
+including the MCP tools) toggles how output is sourced:
+
+| Mode | Behavior |
 |---|---|
-| `tests/test_reuse_imports.py` | Phase 0 smoke test — the DB-free leaves import via the seam, in-venv. |
-| `tests/test_iatronix_untouched.py` | **The Iatronix-safety guard** — baseline-diff, hard-fails on any new delta. |
-| `tests/test_grounding.py` | Exact-shape grounding-gate pseudo-response; grounded item survives, sourceless stripped. |
-| `tests/test_novelty.py` | "ACE inhibitor causes dry cough" → `established`, never promoted to an experiment. |
-| `tests/test_schema.py` | `TransBrief` validates for all 3 `tests/fixtures.py` demo inputs; `top_experiment.dataset_pointer` present. |
-| `tests/test_universal_domains.py` | **Domain-universality proof** — 4 cross-domain observations (rheumatoid arthritis, melanoma, recurrent *C. difficile*, T2D); every real PubMed query anchors on that observation's OWN condition and never on "hypertension"; the proven RA regression case grounds real, on-topic literature end to end. |
-| `tests/test_cost.py` | ≤3 hypotheses, ≤`ABSTRACT_CAP` abstracts/hypothesis, entailment batched-per-hypothesis (not per-item). |
-| `tests/test_mcp_parity.py` | The MCP tools faithfully pass through the engine's brief; retrieval-snapshot replay is deterministic with zero network calls. |
-| `tests/test_agents_phase2.py` / `test_retrieval_phase3.py` / `test_experiment_phase5.py` | Per-phase acceptance tests (decompose/hypothesize; retrieval+grading+grounding; experiment design + full brief assembly). |
-| `tests/test_pubmed_query_builder.py` / `test_rigor_entailment_correlation.py` | Fully offline regression guards for the PubMed query builder and the entailment-correlation fix. |
-| `tests/test_snapshot_toggle.py` | `TRANSBENCH_MODE=live\|golden\|snapshot` (see [Deterministic demo / snapshot mode](#deterministic-demo--snapshot-mode)) — fully offline/deterministic, zero live calls. |
+| `live` (default) | The full 8-agent pipeline. |
+| `golden` | Returns a pre-captured `TransBrief` **verbatim** — deterministic, keyless replay. |
+| `snapshot` | Runs the **real** pipeline but replays PubMed retrieval from a bundled snapshot (fixed evidence, live reasoning). |
+
+**Golden mode auto-selects.** With `TRANSBENCH_GOLDEN_BRIEF` unset, golden mode scans
+`snapshots/*_golden_brief.json` and serves the one whose `request_echo` matches your observation
+(normalized) — so the committed hypertension, diabetes, melanoma, and RA briefs all "just work", and
+dropping in a new domain golden needs **zero code changes**. Setting `TRANSBENCH_GOLDEN_BRIEF`
+explicitly pins a single file (legacy behavior). Either way, a brief is only ever served for a
+matching observation — a mismatch transparently falls back to the live pipeline, so golden mode can
+**never** serve the wrong brief.
+
+---
+
+## Reproducibility — no fake data
+
+- **Everything shown is real.** Screenshots and numbers come from committed `snapshots/*.json`; the
+  images are regenerated by `python docs/generate_readme_assets.py` from those files.
+- **Anyone reproduces the demos, free.** `TRANSBENCH_MODE=golden` replays the committed briefs
+  byte-identical with no API key.
+- **Live results are close, not identical.** Live runs re-derive results against *today's* PubMed, so
+  citations shift as the literature grows — the same observation gives close-enough results for
+  anyone, and the *experiment* (named dataset + protocol + prompt) is the durable, rerunnable
+  artifact. Every run records its models, queries, PMIDs, and dataset pointer in `run_manifest`.
+
+---
+
+## Reusing Iatronix, read-only
+
+TransBench never edits Iatronix. A **baseline-diff guard**
+([`tests/test_iatronix_untouched.py`](tests/test_iatronix_untouched.py), run under
+`PYTHONDONTWRITEBYTECODE=1`) snapshots `git -C <IATRONIX_PATH> status --porcelain` at the start of
+every test session and hard-fails on any new delta (not an absolute-empty assertion — Iatronix
+legitimately carries unrelated untracked files). Verified clean across every phase of this build,
+including every live pipeline run.
+
+---
+
+## Tests
+
+**206 tests across 15 modules** — mostly fully offline/deterministic (fake-LLM doubles, pure
+functions, or free NCBI-only calls). The handful of live Anthropic tests share **one** flagship
+pipeline run via a session-scoped fixture and skip cleanly without a key:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q tests/
+```
+
+The load-bearing guards: `test_iatronix_untouched` (read-only enforcement), `test_grounding` +
+`test_novelty` (the rigor gates), `test_universal_domains` (every PubMed query anchors on the
+observation's *own* disease, never "hypertension"), `test_snapshot_toggle` (live/golden/snapshot +
+golden auto-select), `test_mcp_parity` (the MCP tools faithfully pass the engine's brief), and
+`test_cost` (≤3 hypotheses, batched entailment). Per-phase acceptance tests cover
+decompose→assemble.
 
 ---
 
@@ -359,27 +397,24 @@ Key test files:
 
 ```
 transbench/
-├─ src/transbench/        # config, schemas, prompts, reuse seam, 8 agents, rigor, LangGraph engine
-├─ mcp_server/             # FastMCP server (stdio + HTTP), run scripts, connector manifest
-├─ tests/                  # fixtures + full test suite (see above)
-├─ snapshots/               # bundled golden brief + retrieval snapshot (see "Deterministic demo / snapshot mode")
-├─ BUILD_SPEC.md            # full design spec (reuse strategy, schemas, agents, prompts, rigor, MCP, demo)
-├─ KICKOFF.md               # phase-by-phase build plan + non-negotiable rules
-├─ CLAUDE_SCIENCE_SETUP.md  # Claude Science connector registration walkthrough
-├─ PLAN.md                  # Phase 0 path-decision + phase-by-phase execution log
-└─ .env.example
+├─ src/transbench/     # config, schemas, prompts, reuse seam, 8 agents, rigor, LangGraph engine
+├─ mcp_server/         # FastMCP server (stdio + HTTP), run scripts, connector manifest
+├─ snapshots/          # committed golden briefs (hypertension, T2D, melanoma, RA) + retrieval snapshot
+├─ docs/               # generate_readme_assets.py + img/ (SVG cards, generated from snapshots/)
+├─ tests/              # fixtures + 206-test suite
+├─ BUILD_SPEC.md       # full design spec        KICKOFF.md  # phase-by-phase build plan
+├─ CLAUDE_SCIENCE_SETUP.md   PLAN.md   .env.example
 ```
 
-## Scope / status
+---
 
-Phases 0–8 complete. `generate_experiment` returns a grounded, cited
-`TransBrief` whose `top_experiment` is a runnable scRNA-seq/Perturb-seq
-analysis naming a resolvable dataset with a `claude_science_prompt`; the MCP
-server serves it over stdio (Claude Science) and HTTP (fallback); the
-Iatronix baseline-diff guard shows no new delta. Phase 8 made the pipeline
-domain-universal (see [Domain-universal, not hypertension-only](#domain-universal-not-hypertension-only))
-— any clinical/biomedical observation, not just antihypertensive drugs.
-Claude Science actually *executing* a `claude_science_prompt` against a
-dataset is a demo-day path (the beta app itself, external to this repo) with
-the HTTP + manual-paste fallback above — it is not a code-correctness gate
-for this repo.
+## Scope, safety, and status
+
+Complete and shipped. `generate_experiment` returns a grounded, cited `TransBrief` whose
+`top_experiment` is a runnable single-cell analysis naming a content-verified, resolvable dataset
+with a `claude_science_prompt`; the MCP server serves it over stdio (Claude Science) and HTTP; the
+pipeline is domain-universal; the Iatronix baseline-diff guard shows no new delta. Claude Science
+actually *executing* a prompt is a demo-day path (the beta app, external to this repo), with the
+HTTP + manual-paste fallbacks above.
+
+> **Research hypothesis generation only. Not clinical, diagnostic, or prescribing advice.**
