@@ -5,7 +5,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Local demo / storyline materials — kept OUT of the public repo
+# Local demo / storyline / notes materials — kept OUT of the public repo
 demo/
 DEMO.md
 STORYLINE.md
+summary.md
+SUMMARY.md
