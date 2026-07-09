@@ -1,25 +1,58 @@
-"""schemas.py — Pydantic v2 models, verbatim from BUILD_SPEC.md §4.
+"""schemas.py — Pydantic v2 models, from BUILD_SPEC.md §4.
 
-No field, type, or default has been changed from the spec. If a later phase
-needs a new field, edit BUILD_SPEC.md first (orchestrator/Fable-owned), then
-mirror the change here — this file must never silently drift from §4.
+Every field/type/default here is verbatim from the spec EXCEPT ``Axis``
+(flagged, not silent — see its own comment below): domain-universalization
+(this task) replaced the original 8-value hypertension-specific ``Literal``
+with a free-form, normalized string, because BUILD_SPEC.md §0's own tool
+scope was widened from "an observation about antihypertensive drugs" to any
+clinical/biomedical observation, and a fixed axis taxonomy authored for one
+disease area cannot describe another's mechanism (e.g. an oncology
+observation has no legitimate use for ``raas``/``renal_volume``). Every
+other model — ``Priority``/``NoveltyVerdict``/``EvidenceGrade``, and every
+field on ``TransRequest``/``Reference``/``EvidenceItem``/``GradedHypothesis``/
+``ExperimentPlan``/``TransBrief`` — is unchanged and still must never
+silently drift from §4; if a later phase needs another new field, edit
+BUILD_SPEC.md first (orchestrator/Fable-owned), then mirror the change here.
 """
 from __future__ import annotations
 
-from typing import Literal, Optional
+import re
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 
-Axis = Literal[
-    "raas",
-    "sympathetic",
-    "endothelial_vascular",
-    "renal_volume",
-    "immune_inflammatory",
-    "drug_pk_metabolism",
-    "genetic_pharmacogenomic",
-    "other",
-]
+_AXIS_SEPARATOR_RE = re.compile(r"[^a-z0-9]+")
+
+
+def normalize_axis(value: str) -> str:
+    """Domain-universal ``Axis`` normalization: lowercase, strip, and
+    collapse any run of non-alphanumeric characters (spaces, ``/``, ``+``,
+    ``-``, ``&``, ...) into a single ``_``, with leading/trailing ``_``
+    stripped too (e.g. ``"Immune / Inflammatory"`` -> ``"immune_inflammatory"``,
+    ``"B-cell exhaustion"`` -> ``"b_cell_exhaustion"``). ``Axis`` is a
+    free-form, descriptive biological-axis label — there is no fixed
+    taxonomy to validate membership against (any clinical/biomedical domain
+    names its own relevant axes; axes are never load-bearing for grounding
+    or hypothesis selection, only for readability/rationale) — so THIS
+    normalization is the field's entire validation: it must be non-empty
+    once normalized. Raises ``ValueError`` (Pydantic wraps this into a
+    normal ``ValidationError``, same as any other failed field validator)
+    if nothing alphanumeric survives, e.g. an all-punctuation input.
+    """
+    normalized = _AXIS_SEPARATOR_RE.sub("_", (value or "").strip().lower()).strip("_")
+    if not normalized:
+        raise ValueError("axis must be a non-empty, normalizable label")
+    return normalized
+
+
+# Free-form, lowercase-snake_case biological-axis label (validated non-empty
+# via `normalize_axis` above) — was a fixed 8-value hypertension-specific
+# `Literal` (raas/sympathetic/endothelial_vascular/renal_volume/
+# immune_inflammatory/drug_pk_metabolism/genetic_pharmacogenomic/other);
+# widened for domain-universality (see module docstring). `DecomposedAxis.axis`
+# and `Hypothesis.axis` both use this same `Axis` alias, so both get the
+# identical normalization automatically, with no per-class validator needed.
+Axis = Annotated[str, AfterValidator(normalize_axis)]
 Priority = Literal["high", "medium", "low"]
 NoveltyVerdict = Literal["established", "open_question", "unsupported"]
 EvidenceGrade = Literal[

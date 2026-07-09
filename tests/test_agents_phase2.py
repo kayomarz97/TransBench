@@ -16,12 +16,21 @@ flagship pipeline. It now consumes the shared, session-scoped
 brief every other live test in this suite shares, at zero incremental
 spend (KICKOFF.md Phase 7 spend directive). This file's own assertions
 (agents 1-2's contract) are unchanged.
+
+Phase 8 update (domain-universalization): ``schemas.Axis`` is no longer a
+fixed 8-value ``Literal`` (it is now a free-form, normalized string — any
+clinical/biomedical domain names its own relevant axes; see ``schemas.py``'s
+own docstring) — so this file's assertions are now domain-agnostic:
+non-empty axes/rationale, not membership in a closed set, and no hardcoded
+expectation that this ONE flagship scenario's axes must include
+"immune_inflammatory" by name (that hardcoded assumption doesn't generalize
+to any other domain's own decomposition and was never really a Phase 2
+contract requirement — "the model decomposes into >=2 real, non-empty
+axes" is).
 """
 from __future__ import annotations
 
-from transbench.schemas import Axis, TransBrief
-
-_VALID_AXES = set(Axis.__args__)  # type: ignore[attr-defined]
+from transbench.schemas import TransBrief
 
 
 def test_flagship_decompose_and_hypothesize_real_llm_calls(flagship_brief: TransBrief) -> None:
@@ -31,12 +40,8 @@ def test_flagship_decompose_and_hypothesize_real_llm_calls(flagship_brief: Trans
     # --- Agent 1: Decomposer (Haiku) ---
     axis_names = [a.axis for a in brief.axes]
     assert len(brief.axes) >= 2, f"expected >=2 axes, got {axis_names}"
-    assert "immune_inflammatory" in axis_names, (
-        f"flagship (resistant HTN + elevated hs-CRP) must motivate "
-        f"immune_inflammatory, got {axis_names}"
-    )
     for a in brief.axes:
-        assert a.axis in _VALID_AXES
+        assert isinstance(a.axis, str) and a.axis.strip(), f"axis has an empty/invalid label: {a.axis!r}"
         assert a.rationale.strip(), f"axis {a.axis} has an empty rationale"
 
     # --- Agent 2: Hypothesis Generator (Sonnet) ---
@@ -45,7 +50,7 @@ def test_flagship_decompose_and_hypothesize_real_llm_calls(flagship_brief: Trans
     for h in hypotheses:
         assert h.statement.strip(), f"hypothesis {h.id} has an empty statement"
         assert h.prediction.strip(), f"hypothesis {h.id} has an empty (non-falsifiable) prediction"
-        assert h.axis in _VALID_AXES, f"hypothesis {h.id} has an invalid axis {h.axis!r}"
+        assert isinstance(h.axis, str) and h.axis.strip(), f"hypothesis {h.id} has an empty/invalid axis {h.axis!r}"
 
     # This file only gates agents 1-2's OWN contract (axes/hypotheses shape),
     # not downstream grounding -- the pipeline behind the shared

@@ -2,11 +2,35 @@
 
 Sourcing note (so later phases and reviewers know exactly what to trust):
 
-* Agents **1 (Decomposer)**, **2 (Hypothesis Generator)**, **5 (Novelty
-  Checker)**, **7 (Experiment Designer)** each have a single literal quoted
-  sentence-block in BUILD_SPEC.md §5 — those are reproduced **verbatim,
-  character-for-character**, below (only whitespace/line-wrapping differs from
-  the markdown source; no word was added, removed, or reordered).
+* Agents **1 (Decomposer)** and **2 (Hypothesis Generator)** DEVIATE from
+  BUILD_SPEC.md §5's literal quoted text (flagged here, not silent —
+  same "flag every deviation with a reason" convention this codebase already
+  applies elsewhere, e.g. ``agents.run_retrieve``'s documented query
+  -construction deviations). BUILD_SPEC.md §0's own one-line tool
+  description was originally scoped to "an observation about antihypertensive
+  drugs"; this task (domain-universalization) widened that scope to ANY
+  clinical/biomedical observation — a real, live regression this exact
+  scoping caused: a rheumatoid-arthritis observation's PubMed queries were
+  silently anchored on the literal word "hypertension" (the old
+  ``agents._condition_anchor`` default), grounding zero real evidence. Two
+  changes below fix this at the prompt level:
+    1. ``DECOMPOSER_SYSTEM_PROMPT`` no longer says "antihypertensive drugs"
+       or lists a fixed 8-value hypertension-specific axis taxonomy — it asks
+       for free-form axes AND a new ``condition_anchor`` (the observation's
+       own primary disease/condition, e.g. "rheumatoid arthritis",
+       "melanoma", "type 2 diabetes"), which ``agents.run_decompose``/
+       ``graph.py`` thread through as the real PubMed retrieval anchor
+       (``schemas.Axis`` is correspondingly now a free-form normalized
+       string, not a fixed ``Literal`` — see ``schemas.py``'s own docstring).
+    2. ``HYPOTHESIS_GENERATOR_SYSTEM_PROMPT``'s population-modifier example
+       list ("salt sensitivity, plasma renin, CKD" — all hypertension
+       -specific) is generalized to disease-agnostic modifier categories.
+  **5 (Novelty Checker)**, **7 (Experiment Designer)** still each have a
+  single literal quoted sentence-block in BUILD_SPEC.md §5 — those are
+  reproduced **verbatim, character-for-character**, below (only
+  whitespace/line-wrapping differs from the markdown source; no word was
+  added, removed, or reordered) — neither ever mentioned hypertension or any
+  other single disease, so neither needed a change for domain-universality.
 * Agent **3 (Evidence Retriever)** is explicitly "(no LLM)" in §5 — it runs the
   §3 retrieval flow with no system prompt, so its constant is ``None``.
 * Agents **4 (Evidence Grader)**, **6 (Rigor Gate / entailment)**, and
@@ -29,26 +53,39 @@ something any agent is asked to author.
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# 1. Decomposer (Haiku) — verbatim, BUILD_SPEC.md §5
+# 1. Decomposer (Haiku) — domain-universalized (see module docstring above for
+#    why/how this deviates from BUILD_SPEC.md §5's original antihypertensive
+#    -specific verbatim text).
 # ---------------------------------------------------------------------------
 DECOMPOSER_SYSTEM_PROMPT = (
-    "Split a clinical observation about antihypertensive drugs into distinct "
-    "biological axes (raas, sympathetic, endothelial_vascular, renal_volume, "
-    "immune_inflammatory, drug_pk_metabolism, genetic_pharmacogenomic). Only "
-    "include axes the observation motivates; give rationale + key entities. "
-    'STRICT JSON {"axes":[{"axis","rationale","key_entities"}]}.'
+    "Split a clinical or biomedical observation about ANY disease, drug, or "
+    "mechanism into the most relevant distinct biological axes (short, "
+    "free-form snake_case labels you choose based on what the observation "
+    "actually motivates, e.g. immune_inflammatory, drug_pk_metabolism, "
+    "tumor_microenvironment, host_pathogen_interaction, "
+    "genetic_pharmacogenomic — do not force-fit a fixed list; only include "
+    "axes the observation motivates). Also identify condition_anchor: the "
+    "single primary disease/condition this observation is about, in plain "
+    "words (e.g. 'rheumatoid arthritis', 'melanoma', 'type 2 diabetes', "
+    "'hypertension'). Give rationale + key entities for each axis. STRICT "
+    'JSON {"condition_anchor","axes":[{"axis","rationale","key_entities"}]}.'
 )
 
 # ---------------------------------------------------------------------------
-# 2. Hypothesis Generator (Sonnet, ≤ MAX_HYPOTHESES) — verbatim, BUILD_SPEC.md §5
+# 2. Hypothesis Generator (Sonnet, ≤ MAX_HYPOTHESES) — domain-universalized
+#    (see module docstring above; only the population-modifier example list
+#    changed from BUILD_SPEC.md §5's original hypertension-specific verbatim
+#    text — everything else is unchanged).
 # ---------------------------------------------------------------------------
 HYPOTHESIS_GENERATOR_SYSTEM_PROMPT = (
     "Generate FALSIFIABLE mechanistic hypotheses for the observed phenomenon. "
     "Each names a specific molecule/cell/pathway and includes a PREDICTION "
     "true if it holds. Prefer genuinely open questions over textbook facts. "
-    "Account for population modifiers (ancestry, age, salt sensitivity, "
-    "plasma renin, CKD). No clinical actions. STRICT JSON list of "
-    '{"id","axis","statement","prediction","rationale","priority"}.'
+    "Account for relevant population and biological modifiers (e.g. "
+    "ancestry, age, sex, comorbidities, organ-specific or "
+    "disease-specific genetic/pharmacogenomic variation — whichever apply to "
+    "this observation's own condition). No clinical actions. STRICT JSON "
+    'list of {"id","axis","statement","prediction","rationale","priority"}.'
 )
 
 # ---------------------------------------------------------------------------

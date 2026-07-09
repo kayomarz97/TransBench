@@ -144,18 +144,70 @@ def test_entity_pubmed_query_max_terms_respected() -> None:
 
 
 def test_condition_anchor_detects_hypertension_terms() -> None:
+    """Non-regression: hypertension is still one of the (now several)
+    literal conditions the last-resort heuristic recognizes directly."""
     assert _condition_anchor("58F, resistant hypertension despite ACEi.") == "hypertension"
     assert _condition_anchor("Patient shows elevated blood pressure on exam.") == "hypertension"
     assert _condition_anchor("BP remains poorly controlled on triple therapy.") == "hypertension"
 
 
-def test_condition_anchor_defaults_to_hypertension_when_not_mentioned() -> None:
-    """BUILD_SPEC.md's tool is explicitly scoped to antihypertensive-drug
-    observations (its own one-line description, §0) -- an observation with
-    no literal condition keyword still defaults in-domain, never a guess."""
-    assert _condition_anchor("Patient shows an unusual response to losartan.") == "hypertension"
-    assert _condition_anchor("") == "hypertension"
-    assert _condition_anchor(None) == "hypertension"  # type: ignore[arg-type]
+def test_condition_anchor_is_dynamic_not_hardcoded_to_hypertension() -> None:
+    """THE decisive domain-universality proof for this function (Phase 8):
+    an observation about a DIFFERENT condition must anchor on THAT
+    condition, never silently fall back to "hypertension" (the proven live
+    regression this task fixes — see prompts.py's module docstring: a
+    rheumatoid-arthritis observation's queries used to be built as e.g.
+    "hypertension Th17 Methotrexate", grounding zero real evidence)."""
+    assert (
+        _condition_anchor(
+            "52F, rheumatoid arthritis with inadequate response to "
+            "methotrexate monotherapy; elevated Th17-associated cytokines."
+        )
+        == "rheumatoid arthritis"
+    )
+    assert _condition_anchor("61M, metastatic melanoma progressing on pembrolizumab.") == "melanoma"
+    assert (
+        _condition_anchor("74M, third recurrence of Clostridioides difficile infection.")
+        == "clostridioides difficile infection"
+    )
+    assert (
+        _condition_anchor("49M, type 2 diabetes with persistent postprandial hyperglycemia.")
+        == "type 2 diabetes"
+    )
+    # None of these ever silently resolve to "hypertension" just because
+    # that used to be the unconditional default.
+    for obs in [
+        "52F, rheumatoid arthritis with inadequate response to methotrexate.",
+        "61M, metastatic melanoma progressing on pembrolizumab.",
+        "74M, third recurrence of Clostridioides difficile infection.",
+        "49M, type 2 diabetes with persistent postprandial hyperglycemia.",
+    ]:
+        assert _condition_anchor(obs) != "hypertension"
+
+
+def test_condition_anchor_returns_empty_when_no_condition_recognized() -> None:
+    """Domain-universality fix (Phase 8): an observation whose condition this
+    small last-resort pattern list doesn't happen to name returns "" — NOT a
+    forced single-disease default (the old, pre-fix behavior unconditionally
+    defaulted to "hypertension" here, which was itself the root cause of the
+    proven live regression this task fixes). The PRIMARY anchor source is
+    the decomposer's own LLM-extracted `condition_anchor` (agents.
+    run_decompose / graph.py), which this pure heuristic is only ever a
+    fallback for."""
+    assert _condition_anchor("Patient shows an unusual response to losartan.") == ""
+    assert _condition_anchor("") == ""
+    assert _condition_anchor(None) == ""  # type: ignore[arg-type]
+
+
+def test_entity_pubmed_query_gracefully_omits_empty_anchor() -> None:
+    """When the resolved anchor is "" (no condition recognized by either the
+    decomposer or the heuristic fallback), the query is still built from
+    whatever real signal IS available — never crashes, never inserts a
+    blank/placeholder term."""
+    query = _entity_pubmed_query([], "A variant in SLC12A3 encoding the NCC cotransporter.", "")
+    words_lower = query.lower().split()
+    assert "slc12a3" in words_lower
+    assert "" not in words_lower
 
 
 def test_entity_pubmed_query_real_stance_entities_still_work() -> None:

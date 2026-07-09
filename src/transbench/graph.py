@@ -43,7 +43,13 @@ class TransBenchState(TypedDict, total=False):
     experiment plan, each hypothesis's own ``ArticleRegistry`` (needed by
     ``agents.run_assemble`` to build ``references``), and a run-start
     timestamp (for ``run_manifest``) to this same dict rather than a
-    parallel shape.
+    parallel shape. Phase 8 (domain-universalization) adds
+    ``condition_anchor`` — the Decomposer's own LLM-extracted primary
+    disease/condition for this run (``agents.DecomposeResult.
+    condition_anchor``), populated by ``_decompose_node`` and consumed by
+    ``_retrieve_and_grade_node`` as the real PubMed retrieval anchor for
+    EVERY hypothesis (replacing the old hardcoded-to-hypertension default —
+    see ``agents.py``'s ``_condition_anchor``/``run_retrieve`` docstrings).
     """
 
     observation: str
@@ -56,6 +62,7 @@ class TransBenchState(TypedDict, total=False):
     retrieval_snapshot: Optional[dict]
     run_started_at: str
     axes: list[DecomposedAxis]
+    condition_anchor: Optional[str]
     hypotheses: list[Hypothesis]
     evidence_by_hyp_id: dict[str, list[EvidenceItem]]
     retrieval_manifest_by_hyp_id: dict[str, dict]
@@ -69,17 +76,24 @@ class TransBenchState(TypedDict, total=False):
 async def _decompose_node(state: TransBenchState) -> TransBenchState:
     """Agent 1 — Decomposer (Haiku, ``config.MODEL_CHEAP``). Real LLM call —
     builds its own temperature-0 client via :func:`agents.build_llm` for
-    this one call (BUILD_SPEC.md §5: "Build clients once")."""
+    this one call (BUILD_SPEC.md §5: "Build clients once").
+
+    ``agents.run_decompose`` now returns a ``DecomposeResult`` (Phase 8,
+    domain-universalization) rather than a bare axes list — its
+    ``condition_anchor`` is written into state here so
+    :func:`_retrieve_and_grade_node` can thread it into every hypothesis's
+    real PubMed retrieval anchor.
+    """
     llm = agents.build_llm(
         state.get("model_cheap", config.MODEL_CHEAP),
         state.get("user_key"),
         state.get("user_provider", "anthropic"),
     )
-    axes = await agents.run_decompose(
+    result = await agents.run_decompose(
         {"observation": state["observation"], "focus_drug": state.get("focus_drug")},
         llm,
     )
-    return {**state, "axes": axes}
+    return {**state, "axes": result.axes, "condition_anchor": result.condition_anchor}
 
 
 async def _hypothesize_node(state: TransBenchState) -> TransBenchState:
@@ -112,9 +126,17 @@ async def _retrieve_and_grade_node(state: TransBenchState) -> TransBenchState:
     A hypothesis with genuinely zero retrievable/gradable evidence gets an
     empty list, not a crash (``run_retrieve``/``run_grade`` already handle
     that gracefully) — this node does not add extra error handling on top.
+
+    ``condition_anchor`` (Phase 8, domain-universalization): read once from
+    state (written by :func:`_decompose_node`, the Decomposer's own
+    LLM-extracted primary disease/condition for this run — e.g. "rheumatoid
+    arthritis") and passed to every hypothesis's :func:`agents.run_retrieve`
+    call, so every hypothesis's PubMed query anchors on the SAME real
+    condition instead of the old hardcoded-to-hypertension default.
     """
     hypotheses = state.get("hypotheses", [])
     observation = state["observation"]
+    condition_anchor = state.get("condition_anchor")
     user_key = state.get("user_key")
     user_provider = state.get("user_provider", "anthropic")
     model_cheap = state.get("model_cheap", config.MODEL_CHEAP)
@@ -130,6 +152,7 @@ async def _retrieve_and_grade_node(state: TransBenchState) -> TransBenchState:
                 user_provider=user_provider,
                 model_id=model_cheap,
                 observation=observation,
+                condition_anchor=condition_anchor,
                 retrieval_snapshot=retrieval_snapshot,
             )
             evidence = await agents.run_grade(

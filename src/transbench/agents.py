@@ -27,6 +27,22 @@ hypothesis in a run happening to carry a compound axis could zero out the
 whole batch and raise a spurious ``502 llm_bad_output`` for an otherwise
 -perfectly-good run.
 
+Phase 8 (domain-universalization — the tool's scope widened from "an
+observation about antihypertensive drugs" to any clinical/biomedical
+observation, fixing a PROVEN live regression: a rheumatoid-arthritis
+observation's PubMed queries were silently anchored on the hardcoded literal
+"hypertension", grounding zero real evidence): agent 1
+(:func:`run_decompose`) now ALSO extracts ``condition_anchor`` — the
+observation's own primary disease/condition — returned via
+:class:`DecomposeResult` and threaded through ``graph.py``'s state into
+:func:`run_retrieve`'s real PubMed anchor (:func:`_condition_anchor` is now
+only a last-resort heuristic fallback, never a forced single-disease
+default). ``schemas.Axis`` is correspondingly now a free-form, normalized
+string rather than a fixed 8-value hypertension-specific ``Literal`` — see
+:func:`_normalize_axis_field` (replaces ``_normalize_enum_field`` for this
+one field only; every other enum-valued field is unchanged) and
+``schemas.py``'s own docstring.
+
 Agents 1-2 follow the shape ``async run_<name>(payload: dict, llm) -> ...``
 (BUILD_SPEC.md §5), taking a PRE-BUILT, temperature-0-bound client. Agents 3-4
 have genuinely different contracts per BUILD_SPEC.md §3/§5 (retrieval has no
@@ -82,7 +98,6 @@ from transbench.reuse import (
     validate_citations,
 )
 from transbench.schemas import (
-    Axis,
     DecomposedAxis,
     EvidenceGrade,
     EvidenceItem,
@@ -92,12 +107,14 @@ from transbench.schemas import (
     Priority,
     Reference,
     TransBrief,
+    normalize_axis,
 )
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "TransBenchLLMError",
+    "DecomposeResult",
     "RetrievalResult",
     "build_llm",
     "token_spend_session",
@@ -264,7 +281,15 @@ def _coerce_dict(parsed: Any, preferred_key: Optional[str] = None) -> dict:
 
 # Valid values derived directly from the schema's own Literal definitions —
 # single source of truth, never a duplicated string list that could drift.
-_AXIS_VALUES = frozenset(get_args(Axis))
+# NOTE: ``Axis`` is NOT here (and has no `_AXIS_VALUES` frozenset) — Phase-8
+# domain-universalization replaced its fixed 8-value hypertension-specific
+# Literal with a free-form, normalized string (schemas.Axis/schemas.
+# normalize_axis); there is no longer a fixed membership set to validate or
+# salvage against for this one field. See :func:`_normalize_axis_field`
+# below for its own, separate, non-enum normalizer, and
+# :data:`_ENUM_LABEL_SPLIT_RE`'s comment for why axis is intentionally
+# excluded from the compound-label salvage this section still provides for
+# every OTHER (still-fixed) enum field.
 _PRIORITY_VALUES = frozenset(get_args(Priority))
 _GRADE_VALUES = frozenset(get_args(EvidenceGrade))
 
@@ -278,16 +303,18 @@ _GRADE_VALUES = frozenset(get_args(EvidenceGrade))
 # whitelist-of-known-separators regex did not (and structurally never could
 # fully) cover, since the model is free to pick yet another one next time
 # (``"&"``, ``"-"``, an em/en dash, a newline, ...). SEPARATOR-AGNOSTIC fix
-# (round 2, replacing the round-1 whitelist): every schema Literal in this
-# codebase (Axis/Priority/EvidenceGrade/NoveltyVerdict/entailment) is
-# composed ONLY of ``[a-z_]`` — lowercase letters and underscores, both
-# ``\w`` word characters — so splitting the lowered value on ANY RUN of
-# non-word characters (``\W+``) leaves every real token
-# (``renal_volume``/``immune_inflammatory``/``systematic_review``/...)
-# intact while treating literally anything else (space, ``+``, ``&``,
-# ``×``, ``-``, an em/en dash, ``,``, ``/``, ``;``, ``|``, the word "and"
-# surrounded by spaces, a newline, ...) as a separator — uniformly, with no
-# enumeration to fall one separator behind the model on a future run.
+# (round 2, replacing the round-1 whitelist): every schema Literal this
+# section still applies to (Priority/EvidenceGrade/NoveltyVerdict/
+# entailment — Axis is now free-form, see the note above; it never needs
+# this kind of salvage since ANY non-empty normalized value is already
+# valid for it) is composed ONLY of ``[a-z_]`` — lowercase letters and
+# underscores, both ``\w`` word characters — so splitting the lowered value
+# on ANY RUN of non-word characters (``\W+``) leaves every real token
+# (``systematic_review``/``open_question``/...) intact while treating
+# literally anything else (space, ``+``, ``&``, ``×``, ``-``, an em/en
+# dash, ``,``, ``/``, ``;``, ``|``, the word "and" surrounded by spaces, a
+# newline, ...) as a separator — uniformly, with no enumeration to fall one
+# separator behind the model on a future run.
 _ENUM_LABEL_SPLIT_RE = re.compile(r"\W+")
 
 
@@ -334,11 +361,13 @@ def _normalize_enum_field(item: dict, field: str, valid_values: frozenset[str]) 
     strictness against genuinely-invalid values; it is a genuine *salvage*,
     never a guess).
 
-    Reused by every agent with an enum-valued LLM output field — axis
-    (decompose/hypothesize), priority (hypothesize), grade (grade), novelty
-    (rigor.run_novelty), entailment (rigor.run_entailment) — via this one
-    shared helper, so this fix benefits all of them uniformly from a single
-    change.
+    Reused by every agent with a FIXED-enum-valued LLM output field —
+    priority (hypothesize), grade (grade), novelty (rigor.run_novelty),
+    entailment (rigor.run_entailment) — via this one shared helper, so this
+    fix benefits all of them uniformly from a single change. NOT used for
+    axis (decompose/hypothesize) since Phase 8 (domain-universalization) —
+    see :func:`_normalize_axis_field` immediately below for axis's own,
+    separate, non-enum normalizer.
     """
     value = item.get(field)
     if not isinstance(value, str) or value in valid_values:
@@ -356,6 +385,37 @@ def _normalize_enum_field(item: dict, field: str, valid_values: frozenset[str]) 
     # No valid member found anywhere (exact, cased, or as a compound-label
     # component split on ANY non-word separator) -- leave item[field]
     # exactly as the model returned it.
+
+
+def _normalize_axis_field(item: dict, field: str = "axis") -> None:
+    """Light, NON-enum normalizer for the free-form ``axis`` field
+    (``schemas.Axis`` is a normalized string, not a fixed ``Literal`` — see
+    that module's docstring; Phase 8, domain-universalization). Unlike
+    :func:`_normalize_enum_field` (fixed-membership salvage against a closed
+    set, still used for priority/grade/novelty/entailment), this never
+    checks membership — ANY non-empty string normalizes to a valid axis
+    (axes are free-form, descriptive labels, never load-bearing for
+    grounding/hypothesis selection, only for readability/rationale). Applies
+    the SAME normalization ``schemas.normalize_axis`` uses for real Pydantic
+    validation (lowercase, strip, separators/whitespace -> a single ``_``),
+    in place, so a compound/oddly-punctuated raw label from the model (e.g.
+    ``"Immune / Inflammatory"``, ``"renal_volume + immune_inflammatory"``)
+    becomes one coherent snake_case token before it ever reaches Pydantic,
+    rather than depending on Pydantic's own (equally-correct, but less
+    convenient to inspect/log pre-construction) validator to do it. If
+    ``item[field]`` is missing/not a string, or normalizes to nothing at all
+    (e.g. an all-punctuation input), this is a deliberate no-op — the value
+    is left exactly as given and Pydantic's own validation raises its normal
+    clear error (a genuinely-empty axis must still fail loudly, never be
+    silently invented).
+    """
+    value = item.get(field)
+    if not isinstance(value, str):
+        return
+    try:
+        item[field] = normalize_axis(value)
+    except ValueError:
+        pass  # leave as-is; Pydantic construction below will raise clearly
 
 
 def _coerce_bool(value: Any) -> bool:
@@ -467,18 +527,45 @@ def current_token_spend() -> dict:
 # ---------------------------------------------------------------------------
 
 
-async def run_decompose(payload: dict, llm) -> list[DecomposedAxis]:
-    """Agent 1 — Decomposer (BUILD_SPEC.md §5). Splits a clinical observation
-    about antihypertensive drugs into distinct biological axes.
+@dataclass
+class DecomposeResult:
+    """Bundle returned by :func:`run_decompose` (Phase 8, domain
+    -universalization — was a bare ``list[DecomposedAxis]``; widened to also
+    carry the decomposer's own extracted ``condition_anchor`` so
+    ``graph.py`` can thread it through ``TransBenchState`` into
+    :func:`run_retrieve`, the real PubMed retrieval anchor for EVERY
+    hypothesis in the run — see that function's own docstring).
+
+    ``axes``: the validated ``DecomposedAxis`` list, exactly as before.
+    ``condition_anchor``: the observation's primary disease/condition in
+    plain words (e.g. ``"rheumatoid arthritis"``), as extracted by the SAME
+    LLM call that produced ``axes`` — ``""`` (never ``None``) when the model
+    didn't return one (defensive default; :func:`run_retrieve` falls back to
+    its own heuristic, never a forced single-disease default, when this is
+    empty).
+    """
+
+    axes: list[DecomposedAxis]
+    condition_anchor: str = ""
+
+
+async def run_decompose(payload: dict, llm) -> DecomposeResult:
+    """Agent 1 — Decomposer (BUILD_SPEC.md §5, domain-universalized — see
+    ``prompts.py``'s module docstring). Splits ANY clinical/biomedical
+    observation into distinct, free-form biological axes AND extracts the
+    observation's own primary disease/condition as ``condition_anchor``.
 
     payload keys:
         observation (str, required): the clinical observation to decompose.
         focus_drug (str | None, optional).
 
-    Returns only axes the observation actually motivates (never all 7). Items
-    that fail schema validation are logged and skipped rather than failing
-    the whole batch; if NOTHING validates, raises :class:`TransBenchLLMError`
-    (zero axes is never treated as a silent success).
+    Returns only axes the observation actually motivates. Items that fail
+    schema validation are logged and skipped rather than failing the whole
+    batch; if NOTHING validates, raises :class:`TransBenchLLMError` (zero
+    axes is never treated as a silent success). ``condition_anchor`` has no
+    such hard requirement — an LLM response that validly produces axes but
+    omits/blanks ``condition_anchor`` still succeeds, just with ``""``
+    (:func:`run_retrieve`'s own fallback chain handles that gracefully).
     """
     observation = payload["observation"]
     focus_drug = payload.get("focus_drug")
@@ -489,6 +576,7 @@ async def run_decompose(payload: dict, llm) -> list[DecomposedAxis]:
 
     parsed = await _ainvoke_json(llm, DECOMPOSER_SYSTEM_PROMPT, user_content)
     raw_axes = _coerce_list(parsed, preferred_key="axes")
+    condition_anchor = str(parsed.get("condition_anchor") or "").strip() if isinstance(parsed, dict) else ""
 
     axes: list[DecomposedAxis] = []
     for item in raw_axes:
@@ -496,7 +584,7 @@ async def run_decompose(payload: dict, llm) -> list[DecomposedAxis]:
             logger.warning("decompose: skipping non-dict axis item %r", item)
             continue
         item = dict(item)
-        _normalize_enum_field(item, "axis", _AXIS_VALUES)
+        _normalize_axis_field(item, "axis")
         try:
             axes.append(DecomposedAxis(**item))
         except ValidationError as exc:
@@ -508,7 +596,7 @@ async def run_decompose(payload: dict, llm) -> list[DecomposedAxis]:
             "llm_bad_output",
             f"Decomposer produced zero valid axes from response: {parsed!r}",
         )
-    return axes
+    return DecomposeResult(axes=axes, condition_anchor=condition_anchor)
 
 
 # ---------------------------------------------------------------------------
@@ -564,7 +652,7 @@ async def run_hypothesize(payload: dict, llm) -> list[Hypothesis]:
         item = dict(item)
         if not item.get("id"):
             item["id"] = f"h{idx + 1}"
-        _normalize_enum_field(item, "axis", _AXIS_VALUES)
+        _normalize_axis_field(item, "axis")
         _normalize_enum_field(item, "priority", _PRIORITY_VALUES)
         try:
             hypotheses.append(Hypothesis(**item))
@@ -733,34 +821,62 @@ def _is_high_signal_term(word: str) -> bool:
     return len(w) > 2 and wl not in _QUERY_STOPWORDS and wl not in _GENERIC_SYMBOLS
 
 
-# Disease/domain anchor (Opus review, DEFECT 1 final fix). BUILD_SPEC.md's
-# tool is explicitly scoped to "a clinical observation about antihypertensive
-# drugs" (its own one-line description, §0) — every run is, by construction,
-# about hypertension. Detected from the ORIGINAL OBSERVATION (one anchor per
-# run, computed once, shared by every hypothesis's PubMed query — NOT
+# Disease/condition anchor — LAST-RESORT heuristic fallback (Opus review,
+# DEFECT 1 original fix; domain-universalized, Phase 8 — see prompts.py's
+# module docstring for the full regression narrative this fixes: a
+# rheumatoid-arthritis observation's PubMed queries were previously
+# silently forced onto the literal word "hypertension" via this function's
+# OLD unconditional default, grounding ZERO real evidence). The PRIMARY,
+# reliable anchor source is now the Decomposer's own `condition_anchor`
+# output (agent 1, prompts.DECOMPOSER_SYSTEM_PROMPT — a single existing LLM
+# call that already reads the full observation, so it can name ANY disease,
+# not just the handful recognized below), threaded through `graph.py`'s
+# state into `run_retrieve`'s `condition_anchor` kwarg. This function is
+# consulted ONLY when that real anchor is missing/blank (a standalone
+# caller with no decomposer output at all, or a genuine decomposer
+# extraction failure) — a small, non-exhaustive set of LITERAL
+# condition-name patterns (spanning this repo's own shipped fixtures —
+# hypertension, rheumatoid arthritis, type 1/2 diabetes, melanoma, C.
+# difficile infection — recognized directly here as defense-in-depth) rather
+# than a real disease-name extractor (that is deliberately the decomposer's
+# job, not a regex's). Detected from the ORIGINAL OBSERVATION (one anchor
+# per run, computed once, shared by every hypothesis's PubMed query — NOT
 # per-hypothesis, so it can never be crowded out by a specific hypothesis's
 # own jargon-dense phrasing the way a sentence-scanned term can).
 _CONDITION_ANCHOR_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\brheumatoid arthritis\b", re.IGNORECASE), "rheumatoid arthritis"),
+    (re.compile(r"\bpsoriatic arthritis\b", re.IGNORECASE), "psoriatic arthritis"),
+    (re.compile(r"\btype\s*2\s*diabetes(?:\s*mellitus)?\b|\bT2DM\b", re.IGNORECASE), "type 2 diabetes"),
+    (re.compile(r"\btype\s*1\s*diabetes(?:\s*mellitus)?\b|\bT1DM\b", re.IGNORECASE), "type 1 diabetes"),
+    (re.compile(r"\bmelanoma\b", re.IGNORECASE), "melanoma"),
+    (
+        re.compile(r"\bClostridioides\s+difficile\b|\bClostridium\s+difficile\b|\bC\.?\s?diff(?:icile)?\b", re.IGNORECASE),
+        "clostridioides difficile infection",
+    ),
     (re.compile(r"\bhypertension\b", re.IGNORECASE), "hypertension"),
     (re.compile(r"\bblood pressure\b", re.IGNORECASE), "hypertension"),
     (re.compile(r"\bBP\b"), "hypertension"),
 ]
-_DEFAULT_CONDITION_ANCHOR = "hypertension"
 
 
 def _condition_anchor(observation: str) -> str:
-    """Detect the disease/condition anchor term from the ORIGINAL
-    observation. Looks for "hypertension" / "blood pressure" / "BP"
-    (word-boundary, case-insensitive except "BP" which must be uppercase to
-    avoid matching inside ordinary words); defaults to "hypertension" if none
-    of those literal terms appear (e.g. an observation phrased purely around
-    a drug name or a lab value) — BUILD_SPEC.md's tool has no other domain,
-    so this default is always correct in-scope, never a guess.
+    """LAST-RESORT heuristic disease/condition anchor (see the module
+    comment above :data:`_CONDITION_ANCHOR_PATTERNS` for why/when this is
+    even consulted). Case-insensitive word-boundary match against a small
+    set of literal condition names/synonyms (except "BP", which must be
+    uppercase to avoid matching inside ordinary words). Returns ``""`` — NOT
+    a forced single-disease default — when nothing is recognized (e.g. an
+    observation about a condition this small pattern list doesn't happen to
+    name), so a genuinely-unrecognized observation never gets a wrong/
+    misleading anchor forced onto it; :func:`_entity_pubmed_query`'s own
+    ``_add("")`` already no-ops gracefully on an empty anchor, so simply
+    omitting the anchor slot is a safe, correct outcome, not a special case
+    this function needs to handle itself.
     """
     for pattern, anchor in _CONDITION_ANCHOR_PATTERNS:
         if pattern.search(observation or ""):
             return anchor
-    return _DEFAULT_CONDITION_ANCHOR
+    return ""
 
 
 def _entity_pubmed_query(
@@ -791,17 +907,22 @@ def _entity_pubmed_query(
     reached:
 
     0. ``condition_anchor`` — GUARANTEED to be one of the ``max_terms``
-       slots, added FIRST, before anything else, so a hypothesis's own
-       jargon-dense phrasing can never crowd it out (this is the DEFECT 1
-       root-cause fix — earlier rounds had no guaranteed slot at all, so a
-       hypothesis with 2-3 sentence-order-early generic words, e.g. "CD8
-       Clonally expanded", never reached the anchor or a second concept
-       term). Detected ONCE PER RUN from the ORIGINAL OBSERVATION (see
-       :func:`_condition_anchor`) and passed in by the caller — not
-       re-derived per hypothesis, so every hypothesis in a run shares the
-       exact same anchor (BUILD_SPEC.md's tool is scoped to antihypertensive
-       -drug observations, so this is always a real, in-domain term,
-       typically "hypertension").
+       slots (when non-empty), added FIRST, before anything else, so a
+       hypothesis's own jargon-dense phrasing can never crowd it out (this
+       is the DEFECT 1 root-cause fix — earlier rounds had no guaranteed
+       slot at all, so a hypothesis with 2-3 sentence-order-early generic
+       words, e.g. "CD8 Clonally expanded", never reached the anchor or a
+       second concept term). Resolved ONCE PER RUN from the observation's
+       OWN condition (Phase 8, domain-universalization: primarily the
+       Decomposer's real LLM-extracted ``condition_anchor``, e.g.
+       "rheumatoid arthritis"/"melanoma"/"type 2 diabetes"; the heuristic
+       :func:`_condition_anchor` is only a last-resort fallback) and passed
+       in by the caller — not re-derived per hypothesis, so every hypothesis
+       in a run shares the exact same anchor. This function's own ``_add``
+       already no-ops gracefully on an empty string, so a run whose
+       condition truly could not be determined simply omits this slot
+       (never a wrong/misleading forced anchor) rather than defaulting to
+       any single disease.
     1. Gene/pathway-SYMBOL-like token(s) scanned directly out of ``neutral``
        (see ``_SYMBOL_RE`` above), capped at ``max_symbols`` (default 1) —
        the most reliable, specific anchor a hypothesis statement contains
@@ -961,6 +1082,7 @@ async def run_retrieve(
     user_provider: str = "anthropic",
     model_id: Optional[str] = None,
     observation: str = "",
+    condition_anchor: Optional[str] = None,
     retrieval_snapshot: Optional[dict] = None,
 ) -> RetrievalResult:
     """Agent 3 — Evidence Retriever (BUILD_SPEC.md §3; no LLM call is made
@@ -969,14 +1091,24 @@ async def run_retrieve(
     fallback, so from this function's perspective it is just an async data
     transform).
 
-    ``observation`` is the ORIGINAL clinical observation (not the
-    hypothesis) — used only to derive the disease/condition anchor
-    (:func:`_condition_anchor`) that :func:`_entity_pubmed_query` guarantees
-    a slot for. The caller (``graph.py``) passes the SAME observation for
-    every hypothesis in a run, so every hypothesis's query shares the same
-    anchor. Defaults to ``""`` (safely resolves to "hypertension" via
-    ``_condition_anchor``'s own fallback) for standalone/test callers that
-    don't have an observation handy.
+    ``condition_anchor`` (Phase 8, domain-universalization) is the REAL
+    disease/condition anchor for this run, when the caller has one — in
+    practice, ``graph.py`` threads through agent 1's own LLM-extracted
+    ``DecomposeResult.condition_anchor`` (e.g. "rheumatoid arthritis",
+    "melanoma") via ``TransBenchState``, so this is the PRIMARY, reliable
+    source, resolved ONCE per run and shared by every hypothesis's query
+    (never re-derived per hypothesis, so it can never be crowded out by one
+    hypothesis's own jargon-dense phrasing). ``observation`` is the ORIGINAL
+    clinical observation (not the hypothesis) — used ONLY as the input to
+    the last-resort heuristic fallback, :func:`_condition_anchor`, when
+    ``condition_anchor`` itself is ``None``/blank. The effective anchor is
+    therefore ``(condition_anchor or "").strip() or _condition_anchor(
+    observation)`` — which may itself legitimately resolve to ``""`` (no
+    anchor at all, NOT a forced single-disease default — see
+    :func:`_condition_anchor`'s own docstring) when neither source finds
+    one; :func:`_entity_pubmed_query` already handles an empty anchor
+    gracefully. Both default to falsy (``None``/``""``) for standalone/test
+    callers that don't have either handy.
 
     ``retrieval_snapshot`` (BUILD_SPEC.md §9, Phase 5): when provided AND it
     contains an entry keyed by ``hypothesis.id``, this function REPLAYS that
@@ -1096,8 +1228,12 @@ async def run_retrieve(
         hypothesis.statement, model_id or config.MODEL_CHEAP, user_key, user_provider
     )
     neutral = stance.neutral_clinical_question
-    condition_anchor = _condition_anchor(observation)
-    pubmed_query = _entity_pubmed_query(stance.entities, neutral, condition_anchor)
+    # Real decomposer-extracted anchor wins; last-resort heuristic on the
+    # observation text is the fallback; "" (no anchor at all) is a valid,
+    # honest outcome for either -- never a forced single-disease default
+    # (Phase 8, domain-universalization; see this function's own docstring).
+    anchor = (condition_anchor or "").strip() or _condition_anchor(observation)
+    pubmed_query = _entity_pubmed_query(stance.entities, neutral, anchor)
 
     try:
         result = await fetch_evidence_data(pubmed_query)
@@ -2169,13 +2305,17 @@ async def run_assemble(state: dict, llm) -> TransBrief:
     breaking schema validation.
 
     ``run_manifest`` is filled with models/temperature/caps/concurrency/
-    ``focus_drug``/whether a ``retrieval_snapshot`` was supplied on input/the
-    per-hypothesis retrieval snapshot actually captured this run (neutral +
-    pubmed queries and full abstracts, i.e. PMIDs, BUILD_SPEC.md §9)/the
-    selected experiment's hypothesis id and ``dataset_pointer``/
-    ``run_started_at``/``generated_at``/:func:`current_token_spend`'s
-    running total (already includes this function's own ``uncertainty_note``
-    call, since that call happens before ``run_manifest`` is built below).
+    ``focus_drug``/the run's resolved ``condition_anchor`` (Phase 8, domain
+    -universalization — the real PubMed retrieval anchor every hypothesis's
+    query shared this run, for auditability; may legitimately be ``""`` if
+    neither the decomposer nor the heuristic fallback found one)/whether a
+    ``retrieval_snapshot`` was supplied on input/the per-hypothesis
+    retrieval snapshot actually captured this run (neutral + pubmed queries
+    and full abstracts, i.e. PMIDs, BUILD_SPEC.md §9)/the selected
+    experiment's hypothesis id and ``dataset_pointer``/``run_started_at``/
+    ``generated_at``/:func:`current_token_spend`'s running total (already
+    includes this function's own ``uncertainty_note`` call, since that call
+    happens before ``run_manifest`` is built below).
     """
     observation = state.get("observation", "")
     focus_drug = state.get("focus_drug")
@@ -2236,6 +2376,7 @@ async def run_assemble(state: dict, llm) -> TransBrief:
         "abstract_cap": config.ABSTRACT_CAP,
         "concurrency": config.CONCURRENCY,
         "focus_drug": focus_drug,
+        "condition_anchor": state.get("condition_anchor") or "",
         "retrieval_snapshot_provided": state.get("retrieval_snapshot") is not None,
         "retrieval_snapshot": retrieval_manifest_by_hyp_id,
         "selected_experiment_hypothesis_id": top_experiment.hypothesis_id,

@@ -1,13 +1,19 @@
 # TransBench
 
 A translational clinician↔bench research agent, shipped as an MCP connector
-for Claude Science. A clinician pastes a free-text observation about
-antihypertensive drugs; TransBench decomposes it into biological axes,
-generates up to 3 falsifiable mechanistic hypotheses, grounds each in
-retrieved PubMed evidence (support **and** contradiction), applies a novelty
-guard so textbook facts are never shipped as "novel", and designs one
-reproducible computational experiment — naming a concrete, resolvable public
-dataset — ready to hand to Claude Science.
+for Claude Science. A clinician pastes a free-text observation about **any**
+clinical or biomedical phenomenon — any disease, drug, or mechanism, not a
+single fixed disease area — and TransBench decomposes it into the biological
+axes that observation itself motivates, generates up to 3 falsifiable
+mechanistic hypotheses, grounds each in retrieved PubMed evidence (support
+**and** contradiction), applies a novelty guard so textbook facts are never
+shipped as "novel", and designs one reproducible computational experiment —
+naming a concrete, resolvable public dataset — ready to hand to Claude
+Science. The flagship demo below happens to be about resistant hypertension,
+but the pipeline itself is domain-universal: the same 8 agents ground a
+rheumatoid-arthritis, melanoma, recurrent-*C. difficile*, or type-2-diabetes
+observation exactly the same way, each anchored on *its own* condition (see
+[Domain-universal, not hypertension-only](#domain-universal-not-hypertension-only)).
 
 > **Research tool only.** TransBench never emits diagnosis, drug selection,
 > or dosing guidance. Every response carries a fixed disclaimer:
@@ -155,6 +161,58 @@ hypothesis (its own model-proposed GEO accession was caught by the
 dataset-content-verification gate as a real-but-unrelated record and
 correctly rejected before ever reaching the final plan).
 
+## Domain-universal, not hypertension-only
+
+TransBench is not hardcoded to hypertension or antihypertensive drugs — that
+was the flagship demo's *topic*, not the engine's scope. Two things make any
+clinical/biomedical domain work the same way:
+
+1. **Decomposer-extracted `condition_anchor`.** Agent 1 (the Decomposer)
+   reads the observation and returns both its biological axes AND the
+   observation's own primary disease/condition in plain words (e.g.
+   `"rheumatoid arthritis"`, `"melanoma"`, `"type 2 diabetes"`) — this is
+   threaded through the graph as the real PubMed retrieval anchor for every
+   hypothesis generated from that observation, replacing an earlier
+   hardcoded-to-"hypertension" default. A run's resolved anchor is recorded
+   in `run_manifest["condition_anchor"]` for auditability.
+2. **Free-form biological axes.** `axes` are short, LLM-chosen snake_case
+   labels (e.g. `immune_inflammatory_th17`, `tumor_microenvironment`,
+   `host_pathogen_interaction`) rather than a fixed list authored for one
+   disease area — any domain names its own relevant mechanism axes.
+
+Proof (`tests/test_universal_domains.py`, run live against
+`tests/fixtures.AUTOIMMUNE_OBSERVATION` — a rheumatoid-arthritis/
+methotrexate-inadequate-response case, and the PROVEN regression: before
+this fix, this exact scenario's queries were built as e.g. "hypertension
+Th17 Methotrexate," grounding zero real evidence): the built PubMed query
+for every hypothesis contains `"rheumatoid arthritis"`, never
+`"hypertension"` — e.g. `condition_anchor` resolves to `"rheumatoid
+arthritis"` and the query for a methotrexate-pharmacokinetic-resistance
+hypothesis is `"rheumatoid arthritis RFC1 Upregulation"` — and retrieval
+grounds real, on-topic RA literature: PMID 22971639, *"the G80A polymorphism
+of the reduced folate carrier 1 gene (RFC1) [is associated with] MTX
+efficacy,"* directly on-topic for that hypothesis. Three more standalone
+cross-domain fixtures ship in `tests/fixtures.py` for the same proof in
+oncology (`ONCOLOGY_OBSERVATION` — melanoma/checkpoint-inhibitor resistance;
+anchors on `"metastatic melanoma"`, e.g. query `"metastatic melanoma TIM
+expression"`),
+infectious disease (`INFECTIOUS_OBSERVATION` — recurrent *C. difficile*;
+anchors on `"recurrent Clostridioides difficile infection"`, surfacing a
+directly-relevant fecal-microbiota-transplant paper), and metabolic/
+endocrine (`METABOLIC_OBSERVATION` — T2D on metformin; anchors on `"type 2
+diabetes"`, e.g. query `"type 2 diabetes GLP fasting"` surfacing *"HRS-7535
+for Type 2 Diabetes Inadequately Controlled With Metformin"* — matching the
+fixture's own scenario almost verbatim). None of the four ever anchors on
+"hypertension".
+
+Honest scope note: "universal" means any clinical/biomedical observation —
+this is still a PubMed + single-cell-atlas research tool, not a general
+-purpose non-medical query engine. Some domains legitimately have sparser
+PubMed grounding for a freshly-generated, genuinely novel hypothesis than a
+well-studied area like hypertension — the same grounding gate and novelty
+guard that already demote (never fabricate for) a sparse hypothesis in the
+flagship domain apply identically everywhere else.
+
 ### Manual-paste fallback
 
 If the live connector misbehaves during a demo, the payoff is one paste away
@@ -288,6 +346,7 @@ Key test files:
 | `tests/test_grounding.py` | Exact-shape grounding-gate pseudo-response; grounded item survives, sourceless stripped. |
 | `tests/test_novelty.py` | "ACE inhibitor causes dry cough" → `established`, never promoted to an experiment. |
 | `tests/test_schema.py` | `TransBrief` validates for all 3 `tests/fixtures.py` demo inputs; `top_experiment.dataset_pointer` present. |
+| `tests/test_universal_domains.py` | **Domain-universality proof** — 4 cross-domain observations (rheumatoid arthritis, melanoma, recurrent *C. difficile*, T2D); every real PubMed query anchors on that observation's OWN condition and never on "hypertension"; the proven RA regression case grounds real, on-topic literature end to end. |
 | `tests/test_cost.py` | ≤3 hypotheses, ≤`ABSTRACT_CAP` abstracts/hypothesis, entailment batched-per-hypothesis (not per-item). |
 | `tests/test_mcp_parity.py` | The MCP tools faithfully pass through the engine's brief; retrieval-snapshot replay is deterministic with zero network calls. |
 | `tests/test_agents_phase2.py` / `test_retrieval_phase3.py` / `test_experiment_phase5.py` | Per-phase acceptance tests (decompose/hypothesize; retrieval+grading+grounding; experiment design + full brief assembly). |
@@ -313,11 +372,14 @@ transbench/
 
 ## Scope / status
 
-Phases 0–7 complete. `generate_experiment` returns a grounded, cited
+Phases 0–8 complete. `generate_experiment` returns a grounded, cited
 `TransBrief` whose `top_experiment` is a runnable scRNA-seq/Perturb-seq
 analysis naming a resolvable dataset with a `claude_science_prompt`; the MCP
 server serves it over stdio (Claude Science) and HTTP (fallback); the
-Iatronix baseline-diff guard shows no new delta. Claude Science actually
-*executing* a `claude_science_prompt` against a dataset is a demo-day path
-(the beta app itself, external to this repo) with the HTTP + manual-paste
-fallback above — it is not a code-correctness gate for this repo.
+Iatronix baseline-diff guard shows no new delta. Phase 8 made the pipeline
+domain-universal (see [Domain-universal, not hypertension-only](#domain-universal-not-hypertension-only))
+— any clinical/biomedical observation, not just antihypertensive drugs.
+Claude Science actually *executing* a `claude_science_prompt` against a
+dataset is a demo-day path (the beta app itself, external to this repo) with
+the HTTP + manual-paste fallback above — it is not a code-correctness gate
+for this repo.

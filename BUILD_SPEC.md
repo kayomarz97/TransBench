@@ -2,7 +2,9 @@
 
 > This is a **standalone project**. It does NOT live inside Iatronix and never edits Iatronix. It **reuses** Iatronix's grounding/retrieval logic by importing its backend as a read-only dependency. Save this at the new repo root as `BUILD_SPEC.md`; the kickoff prompt (`KICKOFF.md`) references it.
 
-One line: *a clinician pastes an observation about antihypertensive drugs; an agent decomposes it, generates falsifiable mechanistic hypotheses, grounds each in retrieved evidence, discards textbook-as-novel, and outputs a reproducible testable computational experiment that hands off to Claude Science via an MCP connector.*
+One line: *a clinician pastes an observation about any clinical or biomedical phenomenon — any disease, drug, or mechanism; an agent decomposes it, generates falsifiable mechanistic hypotheses, grounds each in retrieved evidence, discards textbook-as-novel, and outputs a reproducible testable computational experiment that hands off to Claude Science via an MCP connector.*
+
+> **Domain-universalization note (post-v1):** this spec's §4/§5/§8 text below is preserved as the original, hypertension-flagship-scoped design record (§5's Decomposer/Hypothesis-Generator prompt quotes, §4's `Axis` literal, §8's flagship). The shipped engine (`src/transbench/`) has since been widened to any clinical/biomedical observation — `schemas.Axis` is now a free-form, normalized string rather than a fixed 8-value hypertension taxonomy, and the Decomposer additionally extracts a `condition_anchor` (the observation's own primary disease/condition) used as the real PubMed retrieval anchor, replacing an earlier hardcoded-to-"hypertension" default. See `src/transbench/schemas.py`, `src/transbench/prompts.py`, and `src/transbench/agents.py`'s own module docstrings for the exact, flagged deviations and their rationale, and `tests/test_universal_domains.py` for the live cross-domain proof (autoimmune/oncology/infectious/metabolic, alongside the still-valid hypertension flagship).
 
 Codename **TransBench** (rename freely). Assumed paths (adjust to yours): new repo `/root/projects/transbench`, Iatronix `/root/projects/med-ai-project`.
 
