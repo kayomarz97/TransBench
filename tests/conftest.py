@@ -148,13 +148,23 @@ _TRANSIENT_EXCEPTION_TYPES = (anthropic.APIConnectionError, anthropic.InternalSe
 
 def is_transient_anthropic_failure(exc: BaseException) -> bool:
     """True iff ``exc`` looks like a transient Anthropic-side failure (a bare
-    500 / connection drop / overload) rather than a real bug."""
+    500 / connection drop / overload / empty-completion 502) rather than a real
+    bug. Retry-once semantics mean a PERSISTENT failure still propagates and
+    fails the caller — this only smooths genuinely-transient model/infra
+    hiccups (incl. an occasional empty/unparseable completion surfacing as
+    ``[502 llm_bad_json]``), it never masks a real regression."""
     if isinstance(exc, _TRANSIENT_EXCEPTION_TYPES):
         return True
-    if getattr(exc, "status_code", None) == 500:
+    if getattr(exc, "status_code", None) in (500, 502):
         return True
     message = str(exc).lower()
-    return "internal server error" in message or "overloaded" in message or " 500 " in f" {message} "
+    return (
+        "internal server error" in message
+        or "overloaded" in message
+        or " 500 " in f" {message} "
+        or " 502 " in f" {message} "
+        or "llm_bad_json" in message
+    )
 
 
 def run_transbench_live_with_retry(observation: str, **kwargs: object) -> TransBrief:
