@@ -60,5 +60,6 @@ providers:
         min_cache_tokens: 1024
         context_window: 200000
         supports_caching: true
+        supports_temperature: false     # Opus 4.8 API 400s on a temperature request param
         tier: 3
         roles: [deep_reason]

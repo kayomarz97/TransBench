@@ -116,6 +116,17 @@ class ProviderRegistry:
         m = self.model_meta(model_id)
         return bool(m and m.get("supports_caching"))
 
+    def supports_temperature(self, model_id: str) -> bool:
+        """Per-MODEL support for a ``temperature`` request param. Defaults to
+        True; set ``supports_temperature: false`` in providers.yaml for a model
+        whose API rejects temperature outright (e.g. Claude Opus 4.8 -> HTTP 400
+        'temperature is deprecated for this model')."""
+        m = self.model_meta(model_id)
+        if not m:
+            return True
+        val = m.get("supports_temperature")
+        return True if val is None else bool(val)
+
     def min_cache_tokens(self, model_id: str) -> Optional[int]:
         m = self.model_meta(model_id) or {}
         v = m.get("min_cache_tokens")

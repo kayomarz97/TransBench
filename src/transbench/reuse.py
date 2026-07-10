@@ -47,6 +47,7 @@ try:
         strip_ungrounded,
     )
     from app.services.llm_factory import create_llm
+    from app.services.provider_registry import get_registry
     from app.services.ranking import rank_article_list
     from app.services.stance_neutralizer import neutralize_query
 
@@ -71,11 +72,30 @@ except ImportError:
         strip_ungrounded,
         validate_citations,
     )
+    from vendored.app.services.provider_registry import get_registry  # type: ignore[import-not-found]
 
     REUSE_SOURCE = "vendored"
 
+
+def model_supports_temperature(model_id: str) -> bool:
+    """True unless ``model_id``'s registry meta sets ``supports_temperature:
+    false`` (e.g. Claude Opus 4.8, whose Anthropic API returns HTTP 400 on a
+    ``temperature`` request param). Reads ``model_meta`` (present on BOTH the
+    installed-Iatronix and vendored registries) rather than a registry method,
+    so the flag resolves regardless of the active reuse path. Fail-open: if the
+    registry cannot answer, assume temperature is accepted, so this can never
+    newly break a model that already worked."""
+    try:
+        meta = get_registry().model_meta(model_id) or {}
+        val = meta.get("supports_temperature")
+        return True if val is None else bool(val)
+    except Exception:  # pragma: no cover -- a registry hiccup must not disable LLM calls
+        return True
+
+
 __all__ = [
     "REUSE_SOURCE",
+    "model_supports_temperature",
     # data_fetcher
     "EvidenceFetchResult",
     "FetchedData",

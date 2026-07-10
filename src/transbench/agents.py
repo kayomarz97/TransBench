@@ -93,6 +93,7 @@ from transbench.reuse import (
     ensure_evidence,
     fetch_evidence_data,
     has_minimum_evidence,
+    model_supports_temperature,
     neutralize_query,
     rank_article_list,
     validate_citations,
@@ -146,18 +147,39 @@ class TransBenchLLMError(Exception):
         super().__init__(f"[{status_code} {error}] {message}")
 
 
+def _without_temperature(llm):
+    """Return ``llm`` with ``temperature`` neutralized so it is OMITTED from the
+    request payload (langchain sends ``temperature`` only when it is not None).
+    For a model that rejects a temperature param outright (e.g. Claude Opus 4.8):
+    the underlying client may still carry a baked-in temperature — the installed
+    -Iatronix ``create_llm`` sets one unconditionally, and that source tree is
+    read-only — so this is the single, path-independent guarantee that
+    temperature is never sent for such a model."""
+    try:
+        return llm.model_copy(update={"temperature": None})
+    except Exception:  # pragma: no cover -- defensive; fall back to in-place if copy unsupported
+        try:
+            llm.temperature = None
+        except Exception:
+            pass
+        return llm
+
+
 def build_llm(model_id: str, user_key: Optional[str], user_provider: str = "anthropic"):
     """Build a temperature-0 LangChain chat client for ``model_id``
     (BUILD_SPEC.md §5/§0.7 — call this ONCE per agent invocation, then reuse
     the returned client for that call).
 
-    ``.bind(temperature=0)`` is REQUIRED here, chained immediately onto
-    ``create_llm(...)``: setting ``LLM_TEMPERATURE=0`` in-process
-    (``config.py``) is belt #1 but is only a *default* (``os.environ.
-    setdefault``) — it does NOT retroactively correct an operator's own
-    pre-exported non-zero ``LLM_TEMPERATURE``. ``.bind(temperature=0)``
-    (belt #2) is what actually guarantees ``temperature=0`` is sent on every
-    request regardless of ambient env (BUILD_SPEC.md §0.7).
+    ``.bind(temperature=0)`` is belt #2 for determinism (BUILD_SPEC.md §0.7):
+    setting ``LLM_TEMPERATURE=0`` in-process (``config.py``) is belt #1 but is
+    only a *default* (``os.environ.setdefault``) — it does NOT retroactively
+    correct an operator's own pre-exported non-zero ``LLM_TEMPERATURE``, so the
+    bind is what guarantees ``temperature=0`` on every request regardless of
+    ambient env. It is applied ONLY to models that accept a ``temperature``
+    param: a model flagged ``supports_temperature: false`` in providers.yaml
+    (e.g. Claude Opus 4.8, whose API 400s on temperature) gets no temperature
+    from ``create_llm`` and none bound here either (see
+    :func:`transbench.reuse.model_supports_temperature`).
 
     Raises:
         TransBenchLLMError: if ``create_llm`` raises ``fastapi.HTTPException``
@@ -165,7 +187,16 @@ def build_llm(model_id: str, user_key: Optional[str], user_provider: str = "anth
             BUILD_SPEC.md §0.4).
     """
     try:
-        return create_llm(model_id, user_key=user_key, user_provider=user_provider).bind(temperature=0)
+        llm = create_llm(model_id, user_key=user_key, user_provider=user_provider)
+        if model_supports_temperature(model_id):
+            # Belt #2 (BUILD_SPEC.md §0.7): pin temperature=0 for determinism.
+            llm = llm.bind(temperature=0)
+        else:
+            # Opus 4.8 etc.: 400s on ANY temperature param. Null whatever the
+            # factory baked in so temperature is never sent (path-independent —
+            # works whether create_llm came from installed Iatronix or vendored).
+            llm = _without_temperature(llm)
+        return llm
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         raise TransBenchLLMError(

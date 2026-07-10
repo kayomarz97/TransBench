@@ -78,8 +78,16 @@ class ProviderAdapter:
         from vendored.app.config import settings  # lazy: keeps routing logic import-light/testable
 
         timeout = settings.llm_timeout_seconds
-        temperature = settings.llm_temperature
         model = self.resolve_model(model_id)
+
+        # Temperature is model-gated: some models (e.g. Claude Opus 4.8) reject a
+        # `temperature` request param outright (HTTP 400). Honor the per-model
+        # registry flag -- omit temperature entirely for those, keep sending it
+        # for every model that accepts it -- so a new such model only needs
+        # `supports_temperature: false` in providers.yaml, never a code change.
+        temp_kwargs: dict[str, Any] = {}
+        if self._reg.supports_temperature(model):
+            temp_kwargs["temperature"] = settings.llm_temperature
 
         if self.client_kind == "anthropic":
             from langchain_anthropic import ChatAnthropic
@@ -88,9 +96,9 @@ class ProviderAdapter:
                 model=model,
                 api_key=api_key,
                 max_tokens=max_tokens,
-                temperature=temperature,
                 timeout=timeout,
                 max_retries=2,  # LangChain handles backoff; smooths transient 429/overload
+                **temp_kwargs,
             )
 
         if self.client_kind == "google_genai":
@@ -100,8 +108,8 @@ class ProviderAdapter:
                 model=model,
                 google_api_key=api_key,
                 max_output_tokens=max_tokens,
-                temperature=temperature,
                 timeout=timeout,
+                **temp_kwargs,
             )
 
         # openai_compatible: Cerebras, OpenAI, OpenRouter, xAI (base_url differs)
@@ -111,9 +119,9 @@ class ProviderAdapter:
             model=model,
             api_key=api_key,
             max_tokens=max_tokens,
-            temperature=temperature,
             timeout=timeout,
             max_retries=1,
+            **temp_kwargs,
         )
         if self.base_url:
             kwargs["base_url"] = self.base_url
