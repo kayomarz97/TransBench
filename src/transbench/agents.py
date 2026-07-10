@@ -2586,6 +2586,25 @@ async def run_assemble(state: dict, llm) -> TransBrief:
     if not uncertainty_note:
         uncertainty_note = _fallback_uncertainty_note(graded_hypotheses, contradictions)
 
+    # Translational-transfer disclosure (Phase 9). Grounding now legitimately
+    # draws on the SAME mechanism studied in OTHER disease/tissue/model contexts
+    # (the grader allows cross-context mechanistic evidence — a mechanism shown
+    # elsewhere is real translational support). When an experiment was ACTUALLY
+    # designed (top_experiment is not None here — the sentinel is only assigned
+    # below), state that inference plainly rather than hiding it: the supporting
+    # evidence may come from another disease, and the experiment is exactly what
+    # tests whether the mechanism operates in the patient's own condition.
+    if top_experiment is not None:
+        _translational_note = (
+            "Translational note: some supporting evidence may derive from the same "
+            "mechanism established in other diseases, tissues, or model systems rather "
+            "than this exact clinical context. That is expected and intended — a "
+            "mechanism shown elsewhere is a testable hypothesis, not an established "
+            "fact, for this patient; the proposed experiment is designed precisely to "
+            "test whether it operates here."
+        )
+        uncertainty_note = f"{uncertainty_note} {_translational_note}".strip() if uncertainty_note else _translational_note
+
     if top_experiment is None:
         top_experiment = _no_eligible_experiment_plan()
 
