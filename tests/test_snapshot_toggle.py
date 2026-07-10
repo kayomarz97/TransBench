@@ -304,15 +304,19 @@ def test_statement_mismatch_falls_back_to_live_retrieval(monkeypatch: pytest.Mon
             fetch_success=True,
         )
 
+    async def _no_extra_sources(query: str, retmax: int = 15) -> list:
+        return []  # keep this test offline + deterministic; extra backends tested separately
+
     monkeypatch.setattr(agents, "neutralize_query", _fake_neutralize)
     monkeypatch.setattr(agents, "fetch_evidence_data", _fake_fetch)
+    monkeypatch.setattr(agents, "gather_extra_sources", _no_extra_sources)
 
     result = asyncio.run(
         agents.run_retrieve(hypothesis, user_key=None, observation="hypertension", retrieval_snapshot=snapshot)
     )
 
     assert calls["neutralize"] == 1
-    assert calls["fetch"] == 2  # support pass + contradiction pass -- proves live retrieval genuinely ran
+    assert calls["fetch"] == 2  # first-query support pass + contradiction pass -- proves live retrieval genuinely ran
     assert all(a.get("pmid") != "99999999" for a in result.ranked), (
         "must never serve evidence captured for a different hypothesis"
     )

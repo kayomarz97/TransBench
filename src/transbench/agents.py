@@ -62,6 +62,7 @@ import asyncio
 import contextlib
 import contextvars
 import datetime as _dt
+import itertools
 import json
 import logging
 import re
@@ -82,7 +83,9 @@ from transbench.prompts import (
     EVIDENCE_GRADER_SYSTEM_PROMPT,
     EXPERIMENT_DESIGNER_SYSTEM_PROMPT,
     HYPOTHESIS_GENERATOR_SYSTEM_PROMPT,
+    SEARCH_QUERY_GENERATOR_SYSTEM_PROMPT,
 )
+from transbench.search_sources import gather_extra_sources
 from transbench.reuse import (
     REUSE_SOURCE,
     EvidenceFetchResult,
@@ -725,6 +728,7 @@ class RetrievalResult:
     ranked: list[dict] = field(default_factory=list)
     registry: Any = None
     fd: Any = None
+    tier_queries: list[str] = field(default_factory=list)  # every PubMed query actually issued (Tier 1..3); reporting/manifest only
 
 
 # ---------------------------------------------------------------------------
@@ -990,6 +994,26 @@ def _entity_pubmed_query(
     itself is somehow falsy AND nothing else is found (should not happen in
     practice — ``_condition_anchor`` always returns a non-empty string).
     """
+    terms = _high_signal_terms(stance_entities, neutral, condition_anchor, max_terms, max_symbols)
+    if not terms:
+        return _shorten_for_pubmed(neutral)
+    return " ".join(terms)
+
+
+def _high_signal_terms(
+    stance_entities: list[str],
+    neutral: str,
+    condition_anchor: str,
+    max_terms: int = 3,
+    max_symbols: int = 1,
+) -> list[str]:
+    """The ordered high-signal PubMed term list — the gathering half of
+    :func:`_entity_pubmed_query`, extracted VERBATIM so that function's tuned
+    output stays byte-for-byte identical (guarded by test_pubmed_query_builder).
+    Reused directly by :func:`run_retrieve` to build the mechanism-only
+    (``condition_anchor=""``) tier and the permutation/combination tier from the
+    same term set. Priority: ``condition_anchor`` (slot 0, when non-empty) ->
+    gene/pathway symbol(s) -> ``neutralize_query`` entities -> content words."""
     terms: list[str] = []
     seen: set[str] = set()
 
@@ -1032,9 +1056,7 @@ def _entity_pubmed_query(
                 break
             _add(w)
 
-    if not terms:
-        return _shorten_for_pubmed(neutral)
-    return " ".join(terms)
+    return terms
 
 
 _STATEMENT_MATCH_RE = re.compile(r"\s+")
@@ -1103,6 +1125,124 @@ def _replay_from_snapshot(hypothesis_id: str, snapshot_entry: dict) -> Retrieval
     )
     return RetrievalResult(
         neutral_query=neutral_query, pubmed_query=pubmed_query, ranked=abstracts, registry=registry, fd=fd
+    )
+
+
+# ---------------------------------------------------------------------------
+# Multi-tier retrieval (Phase 9). A single AND-ed condition-anchored query
+# grounds condition-management hypotheses well but STARVES mechanism-specific
+# ones: foundational cell-biology papers (T-cell exhaustion — TOX/TCF7,
+# TGF-β/SMAD; etc.) live in other-disease / general-immunology literature that
+# never co-mentions the disease name, so AND-ing it excludes them. So
+# run_retrieve ESCALATES, but ONLY when a tier is still below the evidence
+# floor (has_minimum_evidence):
+#   Tier 1  anchored query (unchanged)                 -> condition + mechanism
+#   Tier 2  mechanism-only (drop the anchor)           -> the papers Tier 1 hides
+#   Tier 3  permutation/combination of mech terms      -> different co-indexing
+# Well-grounded domains meet the floor at Tier 1 and never escalate (identical
+# cost to before); only starved hypotheses pay for the extra targeted queries,
+# which also displaces the blunter, blind `ensure_evidence` broadening.
+# ---------------------------------------------------------------------------
+_CONTRA_SUFFIX = "(limitations OR negative OR no association)"
+
+
+def _merge_fetch(*results: EvidenceFetchResult) -> EvidenceFetchResult:
+    """Concatenate several ``EvidenceFetchResult`` buckets into one. Dedup is
+    deferred to ranking/registry (:func:`_dedupe_abstracts` +
+    ``build_article_registry``), exactly as the original support+contradiction
+    concatenation already relied on."""
+    return EvidenceFetchResult(
+        clinical_trial_abstracts=[a for r in results for a in r.clinical_trial_abstracts],
+        systematic_review_abstracts=[a for r in results for a in r.systematic_review_abstracts],
+        guideline_abstracts=[a for r in results for a in r.guideline_abstracts],
+        fetch_success=any(r.fetch_success for r in results),
+    )
+
+
+def _dedupe_abstracts(abstracts: list[dict]) -> list[dict]:
+    """De-duplicate merged abstracts by resolvable id (pmid/nct_id/doi, else
+    normalized title) BEFORE ranking — so a paper surfaced by two tiers is never
+    ranked or graded twice. Order-preserving (keeps the first occurrence)."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for a in abstracts:
+        key = str(a.get("pmid") or a.get("nct_id") or a.get("doi") or (a.get("title") or "").strip().lower())
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        out.append(a)
+    return out
+
+
+def _term_combinations(terms: list[str], size: int = 2, limit: int = 3) -> list[str]:
+    """Up to ``limit`` distinct ``size``-term PubMed queries from ``terms`` — the
+    permutation/combination tier. ``itertools.combinations`` preserves input
+    order, so the most-specific pairs (highest-priority terms first) come first."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for combo in itertools.combinations(terms, size):
+        q = " ".join(t for t in combo if t).strip()
+        key = q.lower()
+        if len(q.split()) < size or key in seen:
+            continue
+        seen.add(key)
+        out.append(q)
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def generate_search_queries(
+    statement: str,
+    neutral: str,
+    anchor: str,
+    entities: list[str],
+    llm,
+    max_queries: int = 3,
+) -> list[str]:
+    """LLM-written clean literature-search queries for a hypothesis (Phase 9).
+    The heuristic :func:`_entity_pubmed_query` emits prose fragments ("TCF7 low",
+    "TGF secreted within") that keyword-AND search cannot ground; the model
+    instead writes high-signal queries ("TCF7 exhaustion CD8 T cell"). ADVISORY:
+    any failure / empty / malformed response returns ``[]`` and the caller falls
+    back to the heuristic builder — this can never break retrieval."""
+    try:
+        lines = [f"Hypothesis: {statement}"]
+        if anchor:
+            lines.append(f"Disease/condition context: {anchor}")
+        if entities:
+            lines.append(f"Entities already extracted: {', '.join(str(e) for e in entities if e)}")
+        parsed = await _ainvoke_json(llm, SEARCH_QUERY_GENERATOR_SYSTEM_PROMPT, "\n".join(lines))
+        raw = _coerce_list(parsed, preferred_key="queries")
+    except Exception:  # noqa: BLE001 -- advisory; retrieval falls back to the heuristic query
+        logger.debug("generate_search_queries failed for %r; heuristic fallback", statement, exc_info=True)
+        return []
+    queries: list[str] = []
+    seen: set[str] = set()
+    for q in raw:
+        s = " ".join(str(q).split()).strip()  # collapse whitespace/newlines
+        if s and 2 <= len(s.split()) <= 8 and s.lower() not in seen:
+            seen.add(s.lower())
+            queries.append(s)
+    return queries[:max_queries]
+
+
+def _inject_extra(base: EvidenceFetchResult, extra: list[dict]) -> EvidenceFetchResult:
+    """Merge EXTRA-source (Europe PMC / Semantic Scholar) abstract dicts into an
+    ``EvidenceFetchResult``. They go in ``systematic_review_abstracts`` (a plain
+    container here): ``article_registry._walk_abstracts`` gives any bucketed
+    abstract with a pmid and no nct_id ``source_type="pubmed"`` (a valid PubMed
+    URL), and ``rank_article_list`` scores each item from its OWN ``pub_types``/
+    fields — so the bucket name is cosmetic and these inherit the full
+    rank -> grade -> ground -> cite pipeline. No-op on empty ``extra``."""
+    if not extra:
+        return base
+    return EvidenceFetchResult(
+        clinical_trial_abstracts=base.clinical_trial_abstracts,
+        systematic_review_abstracts=base.systematic_review_abstracts + list(extra),
+        guideline_abstracts=base.guideline_abstracts,
+        fetch_success=base.fetch_success or bool(extra),
     )
 
 
@@ -1264,24 +1404,73 @@ async def run_retrieve(
     # honest outcome for either -- never a forced single-disease default
     # (Phase 8, domain-universalization; see this function's own docstring).
     anchor = (condition_anchor or "").strip() or _condition_anchor(observation)
-    pubmed_query = _entity_pubmed_query(stance.entities, neutral, anchor)
+    # Query plan (Phase 9): LLM-written clean queries FIRST (best for PubMed +
+    # Europe PMC relevance ranking), then the heuristic entity/anchored query as
+    # a guaranteed fallback + condition-management coverage. Deduped,
+    # order-preserving. The heuristic query always exists, so the plan is never
+    # empty even if the LLM step returns nothing.
+    # LLM query generation is ADVISORY: build the client + call it inside a
+    # guard so a missing key / registry / bad response degrades to the heuristic
+    # query rather than raising (mirrors neutralize_query's own graceful path).
+    try:
+        query_llm = build_llm(model_id or config.MODEL_CHEAP, user_key, user_provider)
+        llm_queries = await generate_search_queries(hypothesis.statement, neutral, anchor, stance.entities, query_llm)
+    except Exception:  # noqa: BLE001 -- advisory; fall back to the heuristic query builder
+        logger.debug("LLM search-query generation unavailable; heuristic fallback", exc_info=True)
+        llm_queries = []
+    heuristic_query = _entity_pubmed_query(stance.entities, neutral, anchor)
+    query_plan: list[str] = []
+    for q in [*llm_queries, heuristic_query]:
+        if q and q.lower() not in {x.lower() for x in query_plan}:
+            query_plan.append(q)
+    pubmed_query = query_plan[0] if query_plan else heuristic_query  # primary; reported in RetrievalResult/snapshot
+    tier_queries: list[str] = []
+
+    async def _gather(q: str) -> EvidenceFetchResult:
+        """One query across ALL sources: the Iatronix clinical fetcher +
+        Europe PMC + Semantic Scholar (concurrently), merged."""
+        iatronix, extra = await asyncio.gather(fetch_evidence_data(q), gather_extra_sources(q))
+        return _inject_extra(iatronix, extra)
 
     try:
-        result = await fetch_evidence_data(pubmed_query)
-        contra = await fetch_evidence_data(f"{pubmed_query} (limitations OR negative OR no association)")
-
         merged = EvidenceFetchResult(
-            clinical_trial_abstracts=result.clinical_trial_abstracts + contra.clinical_trial_abstracts,
-            systematic_review_abstracts=result.systematic_review_abstracts + contra.systematic_review_abstracts,
-            guideline_abstracts=result.guideline_abstracts + contra.guideline_abstracts,
-            fetch_success=result.fetch_success or contra.fetch_success,
+            clinical_trial_abstracts=[], systematic_review_abstracts=[], guideline_abstracts=[], fetch_success=False,
         )
-        fd = FetchedData(query_type="evidence", evidence_data=merged)  # REQUIRED wrapper
+        # Escalate through the plan, stopping as soon as the evidence floor is
+        # met: an easy hypothesis pays for ONE query; a starved mechanism
+        # hypothesis walks the rest. Every query hits every source, so a
+        # mechanism query the clinical fetcher starves is still grounded by
+        # Europe PMC.
+        for q in query_plan:
+            tier_queries.append(q)
+            merged = _merge_fetch(merged, await _gather(q))
+            fd = FetchedData(query_type="evidence", evidence_data=merged)
+            if has_minimum_evidence(fd):
+                break
 
-        if not has_minimum_evidence(fd):  # consumes FetchedData, not the raw result
+        # Contradiction pass on the primary query (support/refute balance,
+        # BUILD_SPEC.md §3) — clinical fetcher only; keeps cost bounded.
+        merged = _merge_fetch(merged, await fetch_evidence_data(f"{pubmed_query} {_CONTRA_SUFFIX}"))
+        fd = FetchedData(query_type="evidence", evidence_data=merged)
+
+        # Permutation/combination tier (cross-source) if STILL below floor.
+        if not has_minimum_evidence(fd):
+            issued = {q.lower() for q in tier_queries}
+            for combo in _term_combinations(_high_signal_terms(stance.entities, neutral, "", max_terms=4)):
+                if combo.lower() in issued:
+                    continue
+                merged = _merge_fetch(merged, await _gather(combo))
+                tier_queries.append(combo)
+                issued.add(combo.lower())
+                fd = FetchedData(query_type="evidence", evidence_data=merged)
+                if has_minimum_evidence(fd):
+                    break
+
+        # Final blunt safety net (Iatronix broadening) only if STILL below floor.
+        if not has_minimum_evidence(fd):
             fd = await ensure_evidence(fd, pubmed_query, "evidence")
 
-        raw_abstracts = (
+        raw_abstracts = _dedupe_abstracts(
             fd.evidence_data.clinical_trial_abstracts
             + fd.evidence_data.systematic_review_abstracts
             + fd.evidence_data.guideline_abstracts
@@ -1292,18 +1481,21 @@ async def run_retrieve(
         registry = build_article_registry(fd)  # URL-guaranteed refs; look up by pmid
 
         return RetrievalResult(
-            neutral_query=neutral, pubmed_query=pubmed_query, ranked=ranked, registry=registry, fd=fd
+            neutral_query=neutral, pubmed_query=pubmed_query, ranked=ranked,
+            registry=registry, fd=fd, tier_queries=tier_queries,
         )
 
     except EvidenceFloorError as exc:
-        logger.warning("run_retrieve: evidence floor exhausted for %r: %s", pubmed_query, exc)
+        logger.warning("run_retrieve: evidence floor exhausted for %r: %s", tier_queries, exc)
         return RetrievalResult(
-            neutral_query=neutral, pubmed_query=pubmed_query, ranked=[], registry=build_article_registry(None), fd=None
+            neutral_query=neutral, pubmed_query=pubmed_query, ranked=[],
+            registry=build_article_registry(None), fd=None, tier_queries=tier_queries,
         )
     except Exception:
-        logger.exception("run_retrieve: unexpected retrieval failure for %r", pubmed_query)
+        logger.exception("run_retrieve: unexpected retrieval failure for %r", tier_queries)
         return RetrievalResult(
-            neutral_query=neutral, pubmed_query=pubmed_query, ranked=[], registry=build_article_registry(None), fd=None
+            neutral_query=neutral, pubmed_query=pubmed_query, ranked=[],
+            registry=build_article_registry(None), fd=None, tier_queries=tier_queries,
         )
 
 

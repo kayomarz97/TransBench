@@ -188,6 +188,7 @@ async def _retrieve_and_grade_node(state: TransBenchState) -> TransBenchState:
         manifest_entry = {
             "neutral_query": retrieval.neutral_query,
             "pubmed_query": retrieval.pubmed_query,
+            "tier_queries": retrieval.tier_queries,
             "abstracts": retrieval.ranked,
             "statement": hypothesis.statement,
         }

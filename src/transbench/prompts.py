@@ -100,6 +100,31 @@ HYPOTHESIS_GENERATOR_SYSTEM_PROMPT = (
 # ---------------------------------------------------------------------------
 EVIDENCE_RETRIEVER_SYSTEM_PROMPT = None
 
+# Search-query generator (Haiku) — Phase 9, multi-tier/multi-DB retrieval. The
+# heuristic keyword builder (`agents._entity_pubmed_query`) reliably grounds
+# condition-management hypotheses but STARVES mechanism-specific ones: it emits
+# prose fragments ("TCF7 low", "TGF secreted within") and a bloated disease
+# anchor, so PubMed keyword-AND finds nothing. This asks the model — which knows
+# that "TCF7-low exhausted state" is searched as "TCF7 exhaustion CD8 T cell" —
+# to write clean, high-signal queries for PubMed/Europe PMC. Output is advisory:
+# `agents.generate_search_queries` falls back to the heuristic builder if this
+# returns nothing usable, so a bad/empty response can never break retrieval.
+SEARCH_QUERY_GENERATOR_SYSTEM_PROMPT = (
+    "You construct literature-search queries (for PubMed and Europe PMC) to find papers that "
+    "could SUPPORT or REFUTE a mechanistic biomedical hypothesis.\n\n"
+    "Rules:\n"
+    "- Output 2-3 SHORT keyword queries, 3-6 words each, most-specific first.\n"
+    "- Use standard biomedical terminology: gene/protein symbols (TCF7, TOX, TIM-3, TGF-β, SMAD), "
+    "cell types (CD8 T cell, CAR-T, TSCM), pathways, and processes (exhaustion, persistence, methylation).\n"
+    "- Cover the mechanism from DIFFERENT angles across the queries (the molecule; the cellular "
+    "process; the therapeutic/disease context) so at least one query matches how the literature is indexed.\n"
+    "- NO full sentences. NO patient specifics (age/sex/'this patient'). NO vague words "
+    "(low, high, prolonged, within, associated, secreted). NO boolean operators or punctuation.\n"
+    '- Return STRICT JSON only: {"queries": ["...", "...", "..."]}.\n\n'
+    "Example hypothesis: \"The TCF7-low exhausted state in this patient's CAR-T is enforced by de novo DNA methylation.\"\n"
+    'Example output: {"queries": ["TCF7 exhaustion CD8 T cell", "DNA methylation T cell exhaustion", "TCF7 CAR-T persistence memory"]}'
+)
+
 # ---------------------------------------------------------------------------
 # 4. Evidence Grader (Haiku) — spec-derived from the §5 procedure (no literal
 #    quote given there). One BATCHED call per hypothesis over all of its
