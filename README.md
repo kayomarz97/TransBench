@@ -1,7 +1,15 @@
 # TransBench
 
+> 🏆 **Built for [Built with Claude: Life Sciences](https://cerebralvalley.ai/e/built-with-claude-life-sciences)** — Anthropic × Gladstone Institutes × Cerebral Valley · **Development Track**
+> 👨‍⚕️ **Built by Dr. Kayomarz** — internal-medicine physician & AI engineer · [kayomarz.com](https://kayomarz.com)
+
 **A translational research agent that turns a clinician's bedside observation into a
 grounded, testable, bench-ready experiment — shipped as an MCP connector for Claude Science.**
+
+**Why it beats a general chatbot:** it grades every hypothesis against *real* PubMed papers
+(resolvable PMIDs), demotes textbook facts so they're never sold as discoveries,
+**content-verifies the public dataset it proposes**, and — when the evidence isn't there —
+**ships nothing instead of hallucinating a plausible answer. The refusal is the feature.**
 
 You describe something you saw in a patient, in plain words. TransBench breaks it into the
 biological mechanisms that could explain it, generates falsifiable hypotheses, **checks each one
@@ -23,6 +31,43 @@ handles whatever you paste in.
 > straight from real captured runs committed in [`snapshots/`](snapshots/). The images are generated
 > from those files by [`docs/generate_readme_assets.py`](docs/generate_readme_assets.py). Anyone can
 > reproduce them **byte-identical, with no API key** — see [Reproducibility](#reproducibility--no-fake-data).
+
+---
+
+## 🎥 Demo (3-minute video)
+
+**▶ Watch the walkthrough:** _add-your-link-here_ — a real de-identified case → a grounded brief with
+live PubMed citations → the experiment run inside Claude Science → and the **honest refusal** when the
+evidence is too thin to ship.
+
+## ⚡ Try it yourself — no API key, two commands
+
+Golden mode replays a real, committed run **byte-for-byte** — nothing to configure, no key, instant:
+
+```bash
+git clone https://github.com/kayomarz97/TransBench.git && cd TransBench && uv sync
+TRANSBENCH_MODE=golden PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "
+import asyncio
+from transbench.engine import run_transbench
+brief = asyncio.run(run_transbench(
+    '49M, type 2 diabetes with persistent postprandial hyperglycemia despite metformin at '
+    'maximal dose and confirmed adherence; elevated fasting glucagon; blunted GLP-1 response '
+    'to mixed-meal testing.'))
+print(brief.top_experiment.claude_science_prompt)
+"
+```
+
+## 🔬 Built with Claude — deeply, not superficially
+
+- **Claude Code** built the whole system — the 8-agent LangGraph engine, the MCP server, and the
+  three rigor gates.
+- **Claude Science** is the destination: TransBench ships as an MCP **connector** and emits a
+  paste-ready `claude_science_prompt` that Claude Science turns into a reproducible figure.
+- **Three Claude tiers** run the pipeline — **Opus 4.8** (hypothesize + experiment design, the two
+  quality levers), **Sonnet** (decompose + novelty), **Haiku** (grade / entail / assemble).
+- **Dataset-agnostic:** it names *and content-verifies* public datasets (GEO, Tabula Sapiens) — and
+  is built to target this hackathon's **Gladstone-provided** data (T-cell sequencing,
+  regulatory-activity prediction, protein-interaction networks).
 
 ---
 
