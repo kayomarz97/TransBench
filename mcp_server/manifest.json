@@ -2,7 +2,7 @@
   "_comment": "Descriptive connector manifest for humans/registration tooling — not a normative MCP protocol file. The live, authoritative tool schemas are served at runtime by mcp_server/server.py itself (FastMCP introspects the @mcp_app.tool()-decorated function signatures/docstrings).",
   "name": "transbench",
   "version": "0.1.0",
-  "description": "TransBench -- a translational clinician<->bench research agent. Decomposes ANY clinical/biomedical observation (any disease, drug, or mechanism -- the PubMed anchor is derived per-observation, not fixed to one domain) into biological axes, generates up to 3 falsifiable mechanistic hypotheses, grounds each in retrieved PubMed evidence (support + contradiction), applies a novelty guard (established/open_question/unsupported) so textbook facts are never shipped as novel, and designs ONE reproducible computational experiment naming a concrete, resolvable public dataset plus a claude_science_prompt. Research tool only -- never diagnosis, drug selection, or dosing advice; every response carries a fixed disclaimer.",
+  "description": "TransBench -- a translational clinician<->bench research agent. Decomposes ANY clinical/biomedical observation (any disease, drug, or mechanism -- the PubMed anchor is derived per-observation, not fixed to one domain) into biological axes, generates up to 3 falsifiable mechanistic hypotheses, grounds each in retrieved PubMed + Europe PMC evidence (support + contradiction), applies a novelty guard (established/open_question/unsupported) so textbook facts are never shipped as novel, and designs ONE reproducible computational experiment naming a concrete, resolvable public dataset plus a claude_science_prompt. Research tool only -- never diagnosis, drug selection, or dosing advice; every response carries a fixed disclaimer.",
   "repo": "/root/projects/transbench",
   "engine_entrypoint": "transbench.engine.run_transbench",
   "sdk": {
@@ -38,6 +38,9 @@
     },
     "optional": {
       "PUBMED_API_KEY": "raises NCBI/PubMed rate limits",
+      "SEMANTIC_SCHOLAR_API_KEY": "optional; enables the Semantic Scholar retrieval backend (skipped without a key -- its keyless pool 429s immediately)",
+      "TRANSBENCH_ENABLE_EUROPEPMC": "default on (no key needed); set 0 to disable the Europe PMC backend",
+      "TRANSBENCH_ENABLE_SEMANTIC_SCHOLAR": "default on when keyed; set 0 to disable",
       "MCP_TRANSPORT": "stdio | sse | streamable-http (default: stdio)",
       "MCP_HTTP_HOST": "default: 127.0.0.1",
       "MCP_HTTP_PORT": "default: 8500"
@@ -56,7 +59,7 @@
         "focus_drug": {"type": "string", "required": false, "default": ""}
       },
       "returns": "Immediately {job_id, status:'running', poll_tool:'get_experiment_result', message}; then poll get_experiment_result(job_id) -> {status:'done', result:<TransBrief, see src/transbench/schemas.py>} or {status:'error', result:{error, message, status_code}}. Obviously-invalid input is rejected inline as {error, message, status_code} (no job).",
-      "cost_note": "~13 LLM calls + live PubMed + live GEO verification per invocation (BUILD_SPEC.md §9)"
+      "cost_note": "~13-16 LLM calls (incl. per-hypothesis search-query generation) + multi-database retrieval (PubMed + ClinicalTrials.gov + Europe PMC; optional Semantic Scholar) + live GEO verification per invocation (BUILD_SPEC.md §9)"
     },
     {
       "name": "search_grounded_evidence",

@@ -6,8 +6,8 @@
 **A translational research agent that turns a clinician's bedside observation into a
 grounded, testable, bench-ready experiment — shipped as an MCP connector for Claude Science.**
 
-**Why it beats a general chatbot:** it grades every hypothesis against *real* PubMed papers
-(resolvable PMIDs), demotes textbook facts so they're never sold as discoveries,
+**Why it beats a general chatbot:** it grades every hypothesis against *real* published papers
+(PubMed + Europe PMC, resolvable PMIDs), demotes textbook facts so they're never sold as discoveries,
 **content-verifies the public dataset it proposes**, and — when the evidence isn't there —
 **ships nothing instead of hallucinating a plausible answer. The refusal is the feature.**
 
@@ -103,7 +103,7 @@ conversation with a computational biologist. Most sparks never make that trip.
    *"52F, rheumatoid arthritis, inadequate response to methotrexate at max dose; persistent
    synovitis; anti-CCP positive."*
 2. **It returns a brief.** Candidate mechanisms, each labelled by *how much real published evidence
-   actually backs it* (with clickable PubMed / ClinicalTrials.gov citations), textbook facts flagged
+   actually backs it* (with clickable PubMed / Europe PMC / ClinicalTrials.gov citations), textbook facts flagged
    as "established" (so they're not dressed up as discoveries), and unsupported guesses demoted.
 3. **It hands you an experiment.** If a mechanism is both a genuine open question *and* grounded in
    evidence, you get one runnable computational experiment — a named public dataset, an ordered
@@ -126,7 +126,7 @@ the work, with three hard quality gates in the middle that anything unsupported 
 flowchart TD
     A["🧑‍⚕️ Clinician observation<br/>free text · any disease, drug, mechanism"] --> B["1 · Decompose<br/>biological axes + condition anchor"]
     B --> C["2 · Hypothesize<br/>≤ 3 falsifiable mechanisms"]
-    C --> D["3 · Retrieve · no LLM<br/>real PubMed + trials<br/>support & contradiction passes"]
+    C --> D["3 · Retrieve · multi-database<br/>PubMed + trials + Europe PMC<br/>LLM-written queries · support & contradiction"]
     D --> E["4 · Grade<br/>map each source → supports / refutes + evidence grade"]
     E --> F{"5–6 · Rigor gates"}
     F --> G["Entailment<br/>does the source <i>actually</i> support the claim?"]
@@ -147,8 +147,8 @@ flowchart TD
 |---|---|---|
 | 1 | Decompose | Splits the observation into biological axes and extracts its own disease anchor (used as the real PubMed search term — so retrieval stays on-topic for *any* domain). |
 | 2 | Hypothesize | Writes up to 3 falsifiable mechanistic hypotheses, each naming specific molecules/cells/pathways and a testable prediction. |
-| 3 | Retrieve | **No LLM.** Pulls real PubMed + ClinicalTrials.gov abstracts, with a dedicated contradiction pass, per hypothesis. |
-| 4 | Grade | Maps each retrieved source to *supports / refutes* + an evidence grade, and attaches a resolvable citation. |
+| 3 | Retrieve | Writes clean, high-signal search queries per hypothesis (a cheap LLM step, with a heuristic fallback), then pulls real abstracts from **multiple databases** — PubMed + ClinicalTrials.gov (clinical evidence) and **Europe PMC** (mechanism/biology literature; optional Semantic Scholar) — with a dedicated contradiction pass. Escalates through more queries only when a hypothesis is under-grounded, so easy cases stay fast. |
+| 4 | Grade | Maps each retrieved source to *supports / refutes* + an evidence grade, and attaches a resolvable citation. Mechanism evidence from a **different disease or model** counts as translational support (the experiment then tests whether it transfers to the patient) — stated in the brief, never hidden. |
 | 5–6 | Rigor gates | Entailment (does the source really support it?), grounding (drop anything with no resolvable citation), novelty (demote textbook facts). |
 | 7 | Design | Only for a hypothesis that is **both** an open question **and** grounded: one computational experiment on a **content-verified** dataset. |
 | 8 | Assemble | Packs everything into a schema-valid `TransBrief` with a full run manifest. |
@@ -233,7 +233,7 @@ generalizable to any PubMed-covered area.
   translational-informatics legwork, with citations and refutation criteria attached.
 
 **Honest scope.** "Universal" means *any clinical/biomedical observation* — this is a PubMed +
-single-cell-atlas research tool, not a general non-medical engine. Some areas legitimately have
+Europe PMC + single-cell-atlas research tool, not a general non-medical engine. Some areas legitimately have
 sparser literature for a freshly-generated novel hypothesis; the same gates that demote a thin
 hypothesis in one domain apply identically everywhere, which is why two of four domains here
 produced no experiment.
@@ -265,12 +265,14 @@ flowchart LR
     end
     subgraph ext["External services"]
       PUB["PubMed /<br/>ClinicalTrials.gov"]
+      EPMC["Europe PMC /<br/>Semantic Scholar"]
       DS["GEO /<br/>Tabula Sapiens"]
       ANTH["Anthropic API<br/>(BYOK)"]
     end
     CS -->|"generate_experiment(observation)"| MCP
     ENG -->|"import · never write"| LEAF
     LEAF --> PUB
+    ENG -->|"multi-DB search · search_sources"| EPMC
     ENG -->|"content-verify accession"| DS
     ENG -->|"create_llm · temp 0"| ANTH
     ENG -->|"TransBrief"| MCP -->|"JSON"| CS

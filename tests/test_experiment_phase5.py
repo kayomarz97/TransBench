@@ -883,7 +883,12 @@ def test_run_assemble_builds_references_contradictions_and_manifest(monkeypatch:
     assert "33333333" in brief.contradictions_surfaced[0]
     assert "h-b" in brief.contradictions_surfaced[0]
 
-    assert brief.uncertainty_note == "Evidence for PMID 33333333 conflicts with PMID 11111111."
+    # uncertainty_note = the computed conflict note, THEN the standing
+    # translational-transfer disclosure appended whenever an experiment is
+    # designed (Phase 9: grounding may draw on the same mechanism studied in a
+    # different disease/model, and the experiment tests whether it transfers).
+    assert brief.uncertainty_note.startswith("Evidence for PMID 33333333 conflicts with PMID 11111111.")
+    assert "Translational note:" in brief.uncertainty_note
     assert brief.top_experiment.hypothesis_id == "h-a"
 
     rm = brief.run_manifest

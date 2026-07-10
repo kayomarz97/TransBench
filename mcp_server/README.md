@@ -60,7 +60,7 @@ Never a raw traceback. `server.py` catches the engine's own `TransBenchLLMError`
 
 ## Cost note
 
-Both tools run the **full** pipeline: ~13 LLM calls across three tiers — **Haiku** (grade / entail / assemble / neutralize), **Sonnet** (decompose / novelty), **Opus** (`MODEL_DEEP`: hypothesize + experiment-design) — plus live PubMed and, when a candidate is selected, a live GEO content-verification fetch (`BUILD_SPEC.md` §9). Opus on the two creative steps raises per-run cost (grading, the many-call step, stays on Haiku, so it's bounded); dial it off with `MODEL_DEEP=claude-sonnet-4-6`.
+Both tools run the **full** pipeline: ~13–16 LLM calls across three tiers — **Haiku** (grade / entail / assemble / neutralize / per-hypothesis search-query generation), **Sonnet** (decompose / novelty), **Opus** (`MODEL_DEEP`: hypothesize + experiment-design) — plus **multi-database retrieval** (PubMed + ClinicalTrials.gov via the Iatronix clinical fetcher, and **Europe PMC** for the mechanism/biology literature the clinical fetcher misses; optional Semantic Scholar) and, when a candidate is selected, a live GEO content-verification fetch (`BUILD_SPEC.md` §9). Opus on the two creative steps raises per-run cost (grading, the many-call step, stays on Haiku, so it's bounded); dial it off with `MODEL_DEEP=claude-sonnet-4-6`. Europe PMC needs no key; Semantic Scholar is skipped unless `SEMANTIC_SCHOLAR_API_KEY` is set (`search_sources.py`).
 
 ## Run time & async submit-poll
 

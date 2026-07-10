@@ -35,7 +35,7 @@ putting it "online", which defeats the point for a healthcare app.
 bash mcp_server/ask.sh "33F, resistant hypertension on telmisartan + thiazide + CCB; raised CRP"
 ```
 It runs the grounded pipeline locally (reads `ANTHROPIC_API_KEY` from `.env`) and prints:
-1. a short grounded brief (hypotheses + real PubMed citations), and
+1. a short grounded brief (hypotheses + real PubMed / Europe PMC citations), and
 2. a **`claude_science_prompt`** block.
 
 Copy that prompt block into a **Claude Science chat** → CS loads the dataset and produces the
@@ -93,8 +93,9 @@ cloudflared tunnel route dns transbench mcp.yourdomain && cloudflared tunnel run
 Connector URL = `https://mcp.yourdomain/mcp` (add a Cloudflare Access policy for privacy).
 
 ## "The first call takes a while / times out and I have to rerun"
-A full run is **~13 model calls** (Opus on the two hardest steps: hypothesize + experiment-design)
-plus **live PubMed** and a **GEO** content fetch, so it legitimately takes **~60–120s** — and longer
+A full run is **~13–16 model calls** (Opus on the two hardest steps: hypothesize + experiment-design;
+Haiku also writes a search query per hypothesis) plus **multi-database retrieval** (PubMed +
+ClinicalTrials.gov + **Europe PMC**) and a **GEO** content fetch, so it legitimately takes **~60–120s** — and longer
 on a **cold** first call. That is longer than **Claude Science's own wait-for-result timeout** for a
 *single* tool call (~60s, a hard ceiling; it is **not** a server timeout — nginx is `3600s`, the
 per-model-call timeout is `90s`, engine import is <1s). A progress-notification keepalive does **not**
@@ -114,6 +115,22 @@ The in-conversation CS agent polls automatically (the tool descriptions tell it 
 (default `1800`, how long a finished result stays pollable before eviction). After
 `systemctl restart transbench-mcp` the next run is cold again by design — but cold no longer means a
 timeout, just a longer poll.
+
+## Data sources (multi-database retrieval)
+Grounding is **not** PubMed-only. For each hypothesis the engine writes clean search queries (a cheap
+LLM step, with a heuristic fallback) and runs them across **multiple databases**, all graded through
+the same rigor pipeline:
+- **PubMed + ClinicalTrials.gov** (the Iatronix clinical-evidence fetcher) — trials, reviews, guidelines.
+- **Europe PMC** (default on, **no key**) — the general mechanism/biology literature the clinical
+  fetcher misses (e.g. T-cell-exhaustion papers). This is what lets mechanistic hypotheses actually ground.
+- **Semantic Scholar** (**optional**) — add a free key as `SEMANTIC_SCHOLAR_API_KEY` in `.env`; without
+  a key it is skipped (its keyless pool rate-limits immediately). Disable a backend with
+  `TRANSBENCH_ENABLE_EUROPEPMC=0` / `TRANSBENCH_ENABLE_SEMANTIC_SCHOLAR=0`.
+
+Mechanism evidence from a **different disease or model** counts as legitimate *translational* support:
+a mechanism shown in melanoma or a mouse model is a testable hypothesis for this patient, and the
+designed experiment is exactly what tests whether it transfers. Every brief that ships an experiment
+states this plainly in its uncertainty note — the inference is disclosed, never hidden.
 
 ## Distribution (self-host + BYOK)
 TransBench is self-contained (`src/vendored/`) — a clone needs no external `med-ai-project`:
