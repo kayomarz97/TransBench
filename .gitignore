@@ -21,3 +21,7 @@ scratchpad-*.md
 future plans.md
 localserver scienec.png
 .gstack/
+
+# Local Claude Code settings — personal permission allowlist, never part of the public repo.
+# The shared, judge-visible config (CLAUDE.md, .claude/agents/, .claude/AGENTS_PLAYBOOK.md) IS committed.
+.claude/settings.local.json

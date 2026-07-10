@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+#
+# pre-push — automated secret backstop. Runs before every `git push`.
+#
+# This is the LAST line of defense; the primary line is the `secret-scanner` agent plus human
+# review. Activate this hook once per clone:
+#
+#     git config core.hooksPath .githooks
+#
+# Deliberate, audited override:  SKIP_SECRET_SCAN=1 git push
+#
+set -euo pipefail
+
+if [ "${SKIP_SECRET_SCAN:-0}" = "1" ]; then
+  echo "⚠️  pre-push: secret scan SKIPPED (SKIP_SECRET_SCAN=1) — make sure you meant to."
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+echo "🔎 pre-push: scanning for secrets & sensitive files before push…"
+exec bash "$ROOT/scripts/scan-secrets.sh" --pre-push
