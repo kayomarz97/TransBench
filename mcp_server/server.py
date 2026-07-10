@@ -53,13 +53,14 @@ would corrupt the protocol stream. All diagnostics go through the stdlib
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
-from typing import Any, Optional
+from typing import Any, Awaitable, Optional, TypeVar
 
 from fastapi import HTTPException
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 # Importing `transbench.engine` (which imports `transbench`, which imports
 # `transbench.config` first — see config.py's own module docstring) runs
@@ -108,6 +109,22 @@ MCP_HTTP_HOST: str = os.environ.get("MCP_HTTP_HOST", "127.0.0.1")
 MCP_HTTP_PORT: int = int(os.environ.get("MCP_HTTP_PORT", "8500"))
 
 mcp_app = FastMCP("transbench", host=MCP_HTTP_HOST, port=MCP_HTTP_PORT)
+
+# ---------------------------------------------------------------------------
+# Keepalive heartbeat. A full run is ~13 LLM calls (Opus on hypothesize +
+# experiment-design), plus live PubMed and a GEO content fetch, so it
+# legitimately takes ~60-120s -- and MORE on a cold first call. The 60s the
+# operator observes is NOT a server timeout (nginx is 3600s, per-LLM-call is
+# 90s, engine import is <1s): it is the MCP *client's* own wait-for-result
+# timeout (e.g. Claude Science). The MCP-standard way to hold a long tool call
+# open is a progress notification: while the engine runs, each tool emits one
+# every _HEARTBEAT_SECONDS so the client keeps seeing activity and does not
+# give up. Interval defaults to 10s (several pings before a ~60s client
+# ceiling); override via MCP_HEARTBEAT_SECONDS. See _await_with_heartbeat.
+# ---------------------------------------------------------------------------
+_HEARTBEAT_SECONDS: float = float(os.environ.get("MCP_HEARTBEAT_SECONDS", "10"))
+
+_T = TypeVar("_T")
 
 # ---------------------------------------------------------------------------
 # MCP-boundary input guard. schemas.TransRequest.observation declares
@@ -239,8 +256,50 @@ async def _call_engine_safely(observation: str, focus_drug: Optional[str]) -> tu
         return None, _clean_error(500, "internal_error", f"{type(exc).__name__}: {exc}")
 
 
+async def _await_with_heartbeat(coro: Awaitable[_T], ctx: Optional[Context], label: str) -> _T:
+    """Await ``coro`` while emitting an MCP progress notification every
+    ``_HEARTBEAT_SECONDS`` — a keepalive so a slow (especially *cold*) run does
+    not exceed the MCP *client's* own wait-for-result timeout (see the
+    "Keepalive heartbeat" note above and CLAUDE_SCIENCE_SETUP.md). This is the
+    MCP-standard mechanism for long-running tools; it changes NOTHING about the
+    engine or the result — it only keeps the connection visibly active.
+
+    Best-effort by construction:
+      * ``ctx.report_progress`` is a documented **no-op** when the client sent
+        no ``progressToken`` (confirmed in the SDK source), so this is safe even
+        against a client that does not use progress at all.
+      * any notification error is swallowed (logged at debug) — a keepalive must
+        NEVER turn a successful engine run into a failed tool call.
+      * ``ctx is None`` (a direct/in-process call, e.g. the parity tests) →
+        degrades to a plain await with **zero added latency**: ``asyncio.wait``
+        returns the instant ``task`` completes, regardless of the interval.
+    """
+    task: asyncio.Task[_T] = asyncio.ensure_future(coro)
+
+    async def _ping(elapsed: float) -> None:
+        if ctx is None:
+            return
+        try:
+            await ctx.report_progress(
+                progress=elapsed,
+                total=None,
+                message=f"TransBench {label}: running the grounded pipeline (~{int(elapsed)}s elapsed)…",
+            )
+        except Exception:  # noqa: BLE001 -- keepalive is best-effort; never fail the call
+            logger.debug("heartbeat progress notification failed (non-fatal)", exc_info=True)
+
+    await _ping(0.0)  # immediate "started" so the client shows activity at once
+    elapsed = 0.0
+    while True:
+        done, _pending = await asyncio.wait({task}, timeout=_HEARTBEAT_SECONDS)
+        if task in done:
+            return task.result()
+        elapsed += _HEARTBEAT_SECONDS
+        await _ping(elapsed)
+
+
 @mcp_app.tool()
-async def generate_experiment(observation: str, focus_drug: str = "") -> dict[str, Any]:
+async def generate_experiment(observation: str, focus_drug: str = "", ctx: Context | None = None) -> dict[str, Any]:
     """Generate a grounded translational research brief from ANY clinical or
     biomedical observation — a disease's drug response/resistance, a drug's
     adverse effect/toxicity, or any mechanism (not limited to any one domain).
@@ -274,7 +333,9 @@ async def generate_experiment(observation: str, focus_drug: str = "") -> dict[st
     bad = _validate_text(observation, "observation")
     if bad is not None:
         return bad
-    brief, error = await _call_engine_safely(observation, focus_drug or None)
+    brief, error = await _await_with_heartbeat(
+        _call_engine_safely(observation, focus_drug or None), ctx, "generate_experiment"
+    )
     if error is not None:
         return error
     assert brief is not None  # _call_engine_safely's own contract: exactly one of (brief, error) is set
@@ -322,7 +383,7 @@ def _grounded_evidence_projection(brief: TransBrief) -> dict[str, Any]:
 
 
 @mcp_app.tool()
-async def search_grounded_evidence(question: str) -> dict[str, Any]:
+async def search_grounded_evidence(question: str, ctx: Context | None = None) -> dict[str, Any]:
     """Look up PubMed-grounded mechanistic evidence for ANY clinical,
     pharmacological, or mechanistic question (utility / fallback tool — a
     lighter-weight sibling of ``generate_experiment``, not limited to any
@@ -348,7 +409,9 @@ async def search_grounded_evidence(question: str) -> dict[str, Any]:
     bad = _validate_text(question, "question")
     if bad is not None:
         return bad
-    brief, error = await _call_engine_safely(question, None)
+    brief, error = await _await_with_heartbeat(
+        _call_engine_safely(question, None), ctx, "search_grounded_evidence"
+    )
     if error is not None:
         return error
     assert brief is not None

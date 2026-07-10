@@ -62,6 +62,10 @@ Never a raw traceback. `server.py` catches the engine's own `TransBenchLLMError`
 
 Both tools run the **full** pipeline: ~13 LLM calls across three tiers — **Haiku** (grade / entail / assemble / neutralize), **Sonnet** (decompose / novelty), **Opus** (`MODEL_DEEP`: hypothesize + experiment-design) — plus live PubMed and, when a candidate is selected, a live GEO content-verification fetch (`BUILD_SPEC.md` §9). Opus on the two creative steps raises per-run cost (grading, the many-call step, stays on Haiku, so it's bounded); dial it off with `MODEL_DEEP=claude-sonnet-4-6`.
 
+## Run time & keepalive
+
+That same full pipeline means a run legitimately takes **~60–120s** (longer on a cold first call). There is **no 60s timeout in this server** — nginx is `3600s`, the per-model-call timeout is `90s`, engine import is <1s; the ~60s an MCP client may hit is *its own* wait-for-result timeout. So instead of a bigger number, each tool emits an **MCP progress notification every `MCP_HEARTBEAT_SECONDS` (default 10s)** while the engine runs (`_await_with_heartbeat` in `server.py`) — the MCP-standard keepalive for long-running tools, so the client keeps the call open. It's best-effort and never affects the result: `report_progress` is a documented no-op if the client sent no `progressToken`, and any notification error is swallowed. The injected `ctx: Context` parameter is hidden from the tools' public schema (clients still see only `observation`/`focus_drug` and `question`).
+
 ## Files
 
 | File | Purpose |
