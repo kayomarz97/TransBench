@@ -15,3 +15,8 @@ SUMMARY.md
 # Private tunnel details (real domain / IP / secret path) — NEVER commit
 tunnel.local.md
 *.local.md
+
+# Local working notes & screenshots — scratch only, never part of the public repo
+scratchpad-*.md
+future plans.md
+localserver scienec.png
