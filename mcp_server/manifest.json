@@ -50,22 +50,31 @@
   "tools": [
     {
       "name": "generate_experiment",
-      "summary": "The showpiece. Full grounded TransBrief incl. one runnable computational experiment.",
+      "summary": "The showpiece. Full grounded TransBrief incl. one runnable computational experiment. ASYNC (submit + poll): starts a background job and returns a job_id in <1s; the full brief is fetched via get_experiment_result. This is because a run legitimately takes ~60-120s (longer cold), beyond an MCP client's single-call wait-for-result timeout.",
       "input_schema": {
         "observation": {"type": "string", "required": true, "minLength": 3, "maxLength": 8000},
         "focus_drug": {"type": "string", "required": false, "default": ""}
       },
-      "returns": "TransBrief (see src/transbench/schemas.py) on success; {error, message, status_code} on failure",
+      "returns": "Immediately {job_id, status:'running', poll_tool:'get_experiment_result', message}; then poll get_experiment_result(job_id) -> {status:'done', result:<TransBrief, see src/transbench/schemas.py>} or {status:'error', result:{error, message, status_code}}. Obviously-invalid input is rejected inline as {error, message, status_code} (no job).",
       "cost_note": "~13 LLM calls + live PubMed + live GEO verification per invocation (BUILD_SPEC.md §9)"
     },
     {
       "name": "search_grounded_evidence",
-      "summary": "Utility/fallback. Same engine run as generate_experiment, reshaped into a lighter grounded-evidence projection (no axes/top_experiment/run_manifest).",
+      "summary": "Utility/fallback. Same engine run as generate_experiment, reshaped into a lighter grounded-evidence projection (no axes/top_experiment/run_manifest). ASYNC (submit + poll), same as generate_experiment.",
       "input_schema": {
         "question": {"type": "string", "required": true, "minLength": 3, "maxLength": 8000}
       },
-      "returns": "{request_echo, hypotheses[{...,evidence[]}], references[], contradictions_surfaced[], uncertainty_note, disclaimer} on success; {error, message, status_code} on failure",
+      "returns": "Immediately {job_id, status:'running', poll_tool:'get_experiment_result', message}; then poll get_experiment_result(job_id) -> {status:'done', result:{request_echo, hypotheses[{...,evidence[]}], references[], contradictions_surfaced[], uncertainty_note, disclaimer}} or {status:'error', result:{error, message, status_code}}.",
       "cost_note": "same cost as generate_experiment -- it is the same full pipeline, only the RETURNED shape is lighter"
+    },
+    {
+      "name": "get_experiment_result",
+      "summary": "Poll for the outcome of a generate_experiment / search_grounded_evidence job. Fast (<1s) every call, so no single call ever nears the client's wait-for-result timeout however long the run takes.",
+      "input_schema": {
+        "job_id": {"type": "string", "required": true}
+      },
+      "returns": "{status:'running', job_id} while working; {status:'done', job_id, result:<brief or projection>} when complete; {status:'error', job_id, result:{error, message, status_code}} on failure; {error:'unknown_job', message, status_code:404} for an unknown/expired job_id (finished results retained ~MCP_JOB_TTL_SECONDS, default 1800s).",
+      "cost_note": "free -- pure registry lookup, no engine/LLM/PubMed calls"
     }
   ],
   "disclaimer": "Research hypothesis generation only. Not clinical, diagnostic, or prescribing advice."

@@ -5,23 +5,25 @@ Both halves reuse the ONE shared, real, live ``flagship_brief`` fixture
 (``tests/conftest.py``) — ZERO additional live Anthropic/PubMed calls beyond
 that single flagship run.
 
-**MCP parity.** ``mcp_server/server.py``'s ``generate_experiment`` /
-``search_grounded_evidence`` tools are thin wrappers that call
-``transbench.engine.run_transbench`` directly (KICKOFF.md Phase 6: "Both
-call the engine — no duplicated logic") and then either return
-``brief.model_dump()`` verbatim or a pure local reshape of it. Re-running the
-full live pipeline a SECOND time through the MCP layer would only prove the
-engine is non-deterministic (it legitimately is, at temp=0, per BUILD_SPEC.md
-§9's own "reproducibility" framing) — it would NOT prove the MCP layer is a
-faithful passthrough. So instead: monkeypatch ``mcp_server.server.run_transbench``
-to return the ALREADY-COMPUTED ``flagship_brief`` and call the REAL
-``generate_experiment``/``search_grounded_evidence`` tool functions directly
-(FastMCP's ``@mcp_app.tool()`` decorator returns the original async function
-unchanged and directly callable — confirmed empirically against this repo's
-installed ``mcp==1.28.1``) — this exercises every line of the MCP layer's OWN
+**MCP parity.** ``mcp_server/server.py``'s tools are ASYNC (submit + poll):
+``generate_experiment`` / ``search_grounded_evidence`` start a background job
+and return a ``job_id``; the actual pipeline payload is computed by the
+internal ``_generate_experiment_result`` / ``_search_grounded_evidence_result``
+coroutines and handed back via ``get_experiment_result``. Re-running the full
+live pipeline a SECOND time through the MCP layer would only prove the engine
+is non-deterministic (it legitimately is, at temp=0, per BUILD_SPEC.md §9's own
+"reproducibility" framing) — it would NOT prove the MCP layer is a faithful
+passthrough. So instead: monkeypatch ``mcp_server.server.run_transbench`` to
+return the ALREADY-COMPUTED ``flagship_brief`` and call the REAL result
+coroutines directly — this exercises every line of the MCP layer's OWN payload
 code (input validation, the engine call site, error-handling boundary,
 ``model_dump()``/reshape) against a real brief, with zero extra spend, and
-proves it is schema-valid and shape-faithful.
+proves it is schema-valid and shape-faithful. A separate lifecycle test then
+drives the real submit -> poll tool path (``generate_experiment`` ->
+``get_experiment_result``) to prove the job registry surfaces that same payload
+faithfully. (FastMCP's ``@mcp_app.tool()`` decorator returns the original async
+function unchanged and directly callable — confirmed empirically against this
+repo's installed ``mcp==1.28.1``.)
 
 **Retrieval-snapshot determinism** (BUILD_SPEC.md §9): replays
 ``agents.run_retrieve`` for every REAL hypothesis in the captured
@@ -66,7 +68,7 @@ def test_mcp_generate_experiment_matches_engine_brief(
     silently drop/alter anything."""
     _patch_engine_to_return(monkeypatch, flagship_brief)
 
-    result = asyncio.run(mcp_server_module.generate_experiment(observation=FLAGSHIP_OBSERVATION, focus_drug=""))
+    result = asyncio.run(mcp_server_module._generate_experiment_result(observation=FLAGSHIP_OBSERVATION, focus_drug=""))
 
     assert "error" not in result, f"unexpected error shape from a stubbed-success engine call: {result}"
     revalidated = TransBrief.model_validate(result)
@@ -90,7 +92,7 @@ def test_mcp_search_grounded_evidence_reshapes_same_brief(
     and its full evidence list must still be present, faithfully."""
     _patch_engine_to_return(monkeypatch, flagship_brief)
 
-    result = asyncio.run(mcp_server_module.search_grounded_evidence(question=FLAGSHIP_OBSERVATION))
+    result = asyncio.run(mcp_server_module._search_grounded_evidence_result(question=FLAGSHIP_OBSERVATION))
 
     assert "error" not in result, f"unexpected error shape from a stubbed-success engine call: {result}"
     for absent_key in ("axes", "top_experiment", "run_manifest"):
@@ -119,17 +121,63 @@ def test_mcp_generate_experiment_returns_clean_structured_error_on_engine_failur
 
     monkeypatch.setattr(mcp_server_module, "run_transbench", _fake_raising)
 
-    result = asyncio.run(mcp_server_module.generate_experiment(observation=FLAGSHIP_OBSERVATION))
+    result = asyncio.run(mcp_server_module._generate_experiment_result(observation=FLAGSHIP_OBSERVATION))
 
     assert result == {"error": "no_api_key", "message": "No API key configured.", "status_code": 402}
 
 
 def test_mcp_generate_experiment_rejects_too_short_observation() -> None:
-    """Input-validation boundary — rejected before the engine is ever
-    called (no monkeypatch needed; zero cost either way)."""
+    """Input-validation boundary — the submit tool rejects obviously-bad input
+    INLINE (that clean error shape, not a job_id) before any job is created or
+    the engine is ever called (no monkeypatch needed; zero cost either way)."""
     result = asyncio.run(mcp_server_module.generate_experiment(observation="ab"))
+    assert "job_id" not in result, "invalid input must fail inline, not be accepted as a job"
     assert result["error"] == "invalid_input"
     assert result["status_code"] == 422
+
+
+def test_mcp_submit_and_poll_lifecycle(
+    flagship_brief: TransBrief, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The async fix (submit + poll): ``generate_experiment`` must return a
+    job handle in <1s, and polling ``get_experiment_result`` with that id must
+    hand back the SAME full brief once the background run finishes — proving
+    the job registry is a faithful passthrough, not just the direct-call path.
+    Engine stubbed to the already-computed flagship brief (zero live cost);
+    submit + poll run on ONE event loop so the background task can complete."""
+    _patch_engine_to_return(monkeypatch, flagship_brief)
+
+    async def _drive() -> dict[str, Any]:
+        submitted = await mcp_server_module.generate_experiment(
+            observation=FLAGSHIP_OBSERVATION, focus_drug=""
+        )
+        assert submitted["status"] == "running"
+        assert submitted["poll_tool"] == "get_experiment_result"
+        assert submitted["job_id"], "submit must return a non-empty job_id"
+        job_id = submitted["job_id"]
+
+        # Poll on the SAME loop; the stubbed engine completes near-instantly, so
+        # a few yields drain the background task. Bounded so a bug can't hang.
+        for _ in range(10_000):
+            polled = await mcp_server_module.get_experiment_result(job_id=job_id)
+            if polled["status"] != "running":
+                return polled
+            await asyncio.sleep(0)
+        raise AssertionError("job never left 'running' — background task did not complete")
+
+    polled = asyncio.run(_drive())
+
+    assert polled["status"] == "done", f"expected done, got {polled}"
+    revalidated = TransBrief.model_validate(polled["result"])
+    assert revalidated == flagship_brief
+
+
+def test_mcp_get_experiment_result_unknown_job() -> None:
+    """Polling an unknown/expired ``job_id`` returns the clean ``unknown_job``
+    error shape (404), never a raw KeyError/traceback."""
+    result = asyncio.run(mcp_server_module.get_experiment_result(job_id="does-not-exist"))
+    assert result["error"] == "unknown_job"
+    assert result["status_code"] == 404
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,15 @@ CLAUDE_SCIENCE_SETUP.md Step 4) and, via ``run_http.sh``, over
   reshaped into a lighter, evidence-focused projection (no ``axes``/
   ``top_experiment``/``run_manifest`` noise) for a quick grounded-literature
   lookup.
+- ``get_experiment_result`` — poll tool. Both runs above are ASYNC: a full
+  pipeline is ~60-120s (longer cold), longer than an MCP client will wait on a
+  single call, so ``generate_experiment``/``search_grounded_evidence`` START a
+  background job and return a ``job_id`` in <1s; the caller polls
+  ``get_experiment_result(job_id)`` (also <1s) until ``status`` is ``"done"``/
+  ``"error"``. No single call ever nears the client's wait-for-result ceiling
+  — the reason the earlier progress-heartbeat keepalive could not help: that
+  ceiling is hard and is not reset by progress notifications. See
+  :func:`_submit_job`.
 
 Both tools call ``transbench.engine.run_transbench`` — the ONLY engine entry
 point either one ever touches (KICKOFF.md Phase 6: "Both call the engine —
@@ -57,10 +66,13 @@ import asyncio
 import logging
 import os
 import sys
-from typing import Any, Awaitable, Optional, TypeVar
+import time
+import uuid
+from dataclasses import dataclass
+from typing import Any, Awaitable, Optional
 
 from fastapi import HTTPException
-from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp import FastMCP
 
 # Importing `transbench.engine` (which imports `transbench`, which imports
 # `transbench.config` first — see config.py's own module docstring) runs
@@ -111,20 +123,27 @@ MCP_HTTP_PORT: int = int(os.environ.get("MCP_HTTP_PORT", "8500"))
 mcp_app = FastMCP("transbench", host=MCP_HTTP_HOST, port=MCP_HTTP_PORT)
 
 # ---------------------------------------------------------------------------
-# Keepalive heartbeat. A full run is ~13 LLM calls (Opus on hypothesize +
+# Async submit-and-poll. A full run is ~13 LLM calls (Opus on hypothesize +
 # experiment-design), plus live PubMed and a GEO content fetch, so it
-# legitimately takes ~60-120s -- and MORE on a cold first call. The 60s the
-# operator observes is NOT a server timeout (nginx is 3600s, per-LLM-call is
-# 90s, engine import is <1s): it is the MCP *client's* own wait-for-result
-# timeout (e.g. Claude Science). The MCP-standard way to hold a long tool call
-# open is a progress notification: while the engine runs, each tool emits one
-# every _HEARTBEAT_SECONDS so the client keeps seeing activity and does not
-# give up. Interval defaults to 10s (several pings before a ~60s client
-# ceiling); override via MCP_HEARTBEAT_SECONDS. See _await_with_heartbeat.
+# legitimately takes ~60-120s -- and MORE on a cold first call. That is longer
+# than the wait-for-result timeout an MCP client (e.g. Claude Science's
+# host.mcp()) imposes on a SINGLE tool call (~60s, a hard ceiling that a
+# progress heartbeat does NOT reset -- an earlier keepalive attempt here proved
+# useless for exactly that reason). So neither tool blocks on the engine:
+# `generate_experiment` / `search_grounded_evidence` START the run as a
+# background job and return a job_id in <1s; the caller polls
+# `get_experiment_result(job_id)` (also <1s) until it is done. No single call
+# ever approaches the client ceiling, however long or cold the run is. See
+# _submit_job / get_experiment_result.
+#
+# Scale guards: at most MCP_MAX_CONCURRENT_JOBS engine runs execute at once (a
+# semaphore; excess jobs wait, still pollable), and finished jobs are evicted
+# MCP_JOB_TTL_SECONDS after completion so the registry stays bounded. The
+# in-memory registry is correct for this single-process server; a multi-worker
+# deployment would move it to shared storage (e.g. Redis).
 # ---------------------------------------------------------------------------
-_HEARTBEAT_SECONDS: float = float(os.environ.get("MCP_HEARTBEAT_SECONDS", "10"))
-
-_T = TypeVar("_T")
+_MAX_CONCURRENT_JOBS: int = int(os.environ.get("MCP_MAX_CONCURRENT_JOBS", "4"))
+_JOB_TTL_SECONDS: float = float(os.environ.get("MCP_JOB_TTL_SECONDS", "1800"))
 
 # ---------------------------------------------------------------------------
 # MCP-boundary input guard. schemas.TransRequest.observation declares
@@ -256,62 +275,133 @@ async def _call_engine_safely(observation: str, focus_drug: Optional[str]) -> tu
         return None, _clean_error(500, "internal_error", f"{type(exc).__name__}: {exc}")
 
 
-async def _await_with_heartbeat(coro: Awaitable[_T], ctx: Optional[Context], label: str) -> _T:
-    """Await ``coro`` while emitting an MCP progress notification every
-    ``_HEARTBEAT_SECONDS`` — a keepalive so a slow (especially *cold*) run does
-    not exceed the MCP *client's* own wait-for-result timeout (see the
-    "Keepalive heartbeat" note above and CLAUDE_SCIENCE_SETUP.md). This is the
-    MCP-standard mechanism for long-running tools; it changes NOTHING about the
-    engine or the result — it only keeps the connection visibly active.
+# ---------------------------------------------------------------------------
+# Job registry (async submit-and-poll; see the "Async submit-and-poll" note
+# above). One long-lived event loop backs the server, so a module-level dict
+# plus a loop-bound semaphore is the right, race-free structure here: asyncio
+# is single-threaded, so every mutation below happens on that one loop.
+# ---------------------------------------------------------------------------
+@dataclass
+class _Job:
+    """One background engine run. ``result`` holds the FINAL dict either tool
+    would have returned synchronously — a brief/projection on success, or a
+    :func:`_clean_error` dict on failure — surfaced verbatim by the poll tool."""
 
-    Best-effort by construction:
-      * ``ctx.report_progress`` is a documented **no-op** when the client sent
-        no ``progressToken`` (confirmed in the SDK source), so this is safe even
-        against a client that does not use progress at all.
-      * any notification error is swallowed (logged at debug) — a keepalive must
-        NEVER turn a successful engine run into a failed tool call.
-      * ``ctx is None`` (a direct/in-process call, e.g. the parity tests) →
-        degrades to a plain await with **zero added latency**: ``asyncio.wait``
-        returns the instant ``task`` completes, regardless of the interval.
-    """
-    task: asyncio.Task[_T] = asyncio.ensure_future(coro)
+    status: str  # "queued" -> "running" -> "done" | "error" (poll maps queued->running)
+    label: str  # which tool started it (for logs / the submit message)
+    created_at: float
+    finished_at: Optional[float] = None
+    result: Optional[dict[str, Any]] = None
+    task: Optional["asyncio.Task[None]"] = None
 
-    async def _ping(elapsed: float) -> None:
-        if ctx is None:
-            return
+
+_JOBS: dict[str, _Job] = {}
+
+_JOB_SEMAPHORE: Optional[asyncio.Semaphore] = None
+_JOB_SEMAPHORE_LOOP: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _job_semaphore() -> asyncio.Semaphore:
+    """The concurrency cap, lazily bound to the *running* loop. Rebinds if the
+    loop changed: the server has one long-lived loop (bound once, reused), but
+    the offline tests drive each case under a fresh ``asyncio.run`` — a
+    semaphore captured from a now-closed loop must never leak across."""
+    global _JOB_SEMAPHORE, _JOB_SEMAPHORE_LOOP
+    loop = asyncio.get_running_loop()
+    if _JOB_SEMAPHORE is None or _JOB_SEMAPHORE_LOOP is not loop:
+        _JOB_SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_JOBS)
+        _JOB_SEMAPHORE_LOOP = loop
+    return _JOB_SEMAPHORE
+
+
+def _evict_expired_jobs() -> None:
+    """Drop FINISHED jobs whose result has been retrievable for longer than
+    ``_JOB_TTL_SECONDS`` — keeps the registry bounded. Never evicts a job that
+    is still queued/running (a slow cold run must stay pollable); in-flight
+    runs are capped instead by the concurrency semaphore."""
+    if not _JOBS:
+        return
+    now = time.monotonic()
+    for jid in [
+        j for j, job in _JOBS.items()
+        if job.finished_at is not None and now - job.finished_at > _JOB_TTL_SECONDS
+    ]:
+        _JOBS.pop(jid, None)
+
+
+def _submit_job(coro: Awaitable[dict[str, Any]], label: str) -> dict[str, Any]:
+    """Start ``coro`` (a ``_*_result`` coroutine that computes the full tool
+    payload) as a registry-owned background task and return a job handle in
+    <1s. The task is owned by the REGISTRY, not by this submit request — so if
+    the client drops the (fast) submit call, the run still completes and its
+    result waits in the registry for the poll, instead of being orphaned."""
+    _evict_expired_jobs()
+    job_id = uuid.uuid4().hex
+    job = _Job(status="queued", label=label, created_at=time.monotonic())
+    _JOBS[job_id] = job
+
+    async def _runner() -> None:
         try:
-            await ctx.report_progress(
-                progress=elapsed,
-                total=None,
-                message=f"TransBench {label}: running the grounded pipeline (~{int(elapsed)}s elapsed)…",
-            )
-        except Exception:  # noqa: BLE001 -- keepalive is best-effort; never fail the call
-            logger.debug("heartbeat progress notification failed (non-fatal)", exc_info=True)
+            async with _job_semaphore():
+                job.status = "running"
+                job.result = await coro
+        except Exception as exc:  # noqa: BLE001 -- background boundary; never lose the failure
+            logger.exception("job %s (%s) crashed", job_id, label)
+            job.result = _clean_error(500, "internal_error", f"{type(exc).__name__}: {exc}")
+        # A _clean_error dict (from the result coro OR the except above) is the
+        # only thing that carries a top-level "error"; a brief/projection never
+        # does. finished_at gates TTL eviction.
+        job.status = "error" if (job.result or {}).get("error") is not None else "done"
+        job.finished_at = time.monotonic()
 
-    await _ping(0.0)  # immediate "started" so the client shows activity at once
-    elapsed = 0.0
-    while True:
-        done, _pending = await asyncio.wait({task}, timeout=_HEARTBEAT_SECONDS)
-        if task in done:
-            return task.result()
-        elapsed += _HEARTBEAT_SECONDS
-        await _ping(elapsed)
+    job.task = asyncio.ensure_future(_runner())
+    return {
+        "job_id": job_id,
+        "status": "running",
+        "poll_tool": "get_experiment_result",
+        "message": (
+            f"TransBench {label} started (full grounded pipeline, ~60-120s, longer on a "
+            f"cold first call). Call get_experiment_result with job_id='{job_id}' every "
+            f"~5s until status is 'done' or 'error'."
+        ),
+    }
+
+
+async def _generate_experiment_result(observation: str, focus_drug: str = "") -> dict[str, Any]:
+    """The full, synchronous payload ``generate_experiment`` ultimately
+    delivers: validate -> run the engine -> a ``TransBrief`` dict, or a
+    :func:`_clean_error` dict on any failure. Run as a background job by
+    :func:`_submit_job` and surfaced by :func:`get_experiment_result`; also the
+    direct call site the offline parity tests exercise (no job layer needed to
+    prove the MCP boundary is a faithful passthrough)."""
+    bad = _validate_text(observation, "observation")
+    if bad is not None:
+        return bad
+    brief, error = await _call_engine_safely(observation, focus_drug or None)
+    if error is not None:
+        return error
+    assert brief is not None  # _call_engine_safely's own contract: exactly one of (brief, error) is set
+    return brief.model_dump()
 
 
 @mcp_app.tool()
-async def generate_experiment(observation: str, focus_drug: str = "", ctx: Context | None = None) -> dict[str, Any]:
+async def generate_experiment(observation: str, focus_drug: str = "") -> dict[str, Any]:
     """Generate a grounded translational research brief from ANY clinical or
     biomedical observation — a disease's drug response/resistance, a drug's
     adverse effect/toxicity, or any mechanism (not limited to any one domain).
 
-    Runs the full TransBench pipeline (decompose -> hypothesize -> retrieve
-    -> grade -> entail -> novelty-check -> design -> assemble) and returns a
-    schema-valid ``TransBrief`` (JSON): decomposed biological axes, up to 3
-    falsifiable mechanistic hypotheses each graded against real PubMed
-    evidence with an auditable novelty verdict, and ONE runnable
-    computational experiment (``top_experiment``) naming a concrete,
-    resolvable public dataset plus a ``claude_science_prompt`` ready to run
-    in Claude Science to produce a reproducible figure.
+    ASYNC (submit + poll): the full pipeline (decompose -> hypothesize ->
+    retrieve -> grade -> entail -> novelty-check -> design -> assemble) runs
+    ~60-120s, longer on a cold first call — longer than an MCP client will wait
+    on one call. So this tool does NOT block: it STARTS the run and returns
+    immediately with a job handle. You MUST then poll
+    ``get_experiment_result(job_id)`` every few seconds until ``status`` is
+    ``"done"`` (the full ``TransBrief`` is in ``result``) or ``"error"``. The
+    finished brief has decomposed biological axes, up to 3 falsifiable
+    hypotheses each graded against real PubMed evidence with an auditable
+    novelty verdict, and ONE runnable computational experiment
+    (``top_experiment``) naming a concrete public dataset plus a
+    ``claude_science_prompt`` ready to run in Claude Science.
 
     Args:
         observation: A free-text clinical/biomedical observation (3-8000
@@ -324,22 +414,19 @@ async def generate_experiment(observation: str, focus_drug: str = "", ctx: Conte
             observation itself.
 
     Returns:
-        A ``TransBrief`` dict on success, or ``{"error", "message",
-        "status_code"}`` on failure (e.g. no/invalid ANTHROPIC_API_KEY).
-        Every successful response carries a fixed research-only disclaimer
-        (BUILD_SPEC.md §0.5) — this tool never emits diagnosis, drug
-        selection, or dosing guidance.
+        Immediately: ``{"job_id", "status": "running", "poll_tool":
+        "get_experiment_result", "message"}``. Poll
+        ``get_experiment_result(job_id)`` for the outcome — on ``"done"`` its
+        ``result`` is the full ``TransBrief`` (carrying the fixed research-only
+        disclaimer, BUILD_SPEC.md §0.5; never diagnosis, drug selection, or
+        dosing), on ``"error"`` its ``result`` is ``{"error", "message",
+        "status_code"}`` (e.g. no/invalid ANTHROPIC_API_KEY). Obviously invalid
+        input is rejected inline here (no job) as that same error shape.
     """
     bad = _validate_text(observation, "observation")
     if bad is not None:
         return bad
-    brief, error = await _await_with_heartbeat(
-        _call_engine_safely(observation, focus_drug or None), ctx, "generate_experiment"
-    )
-    if error is not None:
-        return error
-    assert brief is not None  # _call_engine_safely's own contract: exactly one of (brief, error) is set
-    return brief.model_dump()
+    return _submit_job(_generate_experiment_result(observation, focus_drug), "generate_experiment")
 
 
 def _grounded_evidence_projection(brief: TransBrief) -> dict[str, Any]:
@@ -382,40 +469,93 @@ def _grounded_evidence_projection(brief: TransBrief) -> dict[str, Any]:
     }
 
 
+async def _search_grounded_evidence_result(question: str) -> dict[str, Any]:
+    """The full, synchronous payload ``search_grounded_evidence`` delivers:
+    validate -> run the SAME engine -> the lighter evidence projection, or a
+    :func:`_clean_error` dict on failure. Background-run by :func:`_submit_job`,
+    surfaced by :func:`get_experiment_result`; also the direct call site the
+    parity test exercises."""
+    bad = _validate_text(question, "question")
+    if bad is not None:
+        return bad
+    brief, error = await _call_engine_safely(question, None)
+    if error is not None:
+        return error
+    assert brief is not None
+    return _grounded_evidence_projection(brief)
+
+
 @mcp_app.tool()
-async def search_grounded_evidence(question: str, ctx: Context | None = None) -> dict[str, Any]:
+async def search_grounded_evidence(question: str) -> dict[str, Any]:
     """Look up PubMed-grounded mechanistic evidence for ANY clinical,
     pharmacological, or mechanistic question (utility / fallback tool — a
     lighter-weight sibling of ``generate_experiment``, not limited to any
     one domain).
 
-    Runs the SAME full TransBench pipeline as ``generate_experiment`` (it is
-    not a separate, cheaper retrieval path) but returns a smaller,
-    evidence-focused projection: for each generated hypothesis, its novelty
-    verdict and every retrieved evidence item (each carrying a resolvable
-    citation, an entailment verdict, and an evidence grade), plus the
-    deduplicated reference list, any contradictions surfaced, and the
-    uncertainty note. Omits ``axes``/``top_experiment``/``run_manifest``.
+    ASYNC (submit + poll): runs the SAME full TransBench pipeline as
+    ``generate_experiment`` (not a separate, cheaper retrieval path), so it is
+    just as slow (~60-120s) and is likewise non-blocking — it STARTS the run
+    and returns a job handle immediately. You MUST then poll
+    ``get_experiment_result(job_id)`` until ``status`` is ``"done"``/
+    ``"error"``. On ``"done"``, ``result`` is the smaller, evidence-focused
+    projection: for each hypothesis its novelty verdict and every retrieved
+    evidence item (each with a resolvable citation, an entailment verdict, and
+    an evidence grade), plus the deduplicated reference list, any
+    contradictions surfaced, and the uncertainty note. Omits ``axes``/
+    ``top_experiment``/``run_manifest``.
 
     Args:
         question: A free-text clinical/pharmacological/mechanistic question
             (3-8000 characters), any domain.
 
     Returns:
-        The grounded-evidence projection dict on success, or
-        ``{"error", "message", "status_code"}`` on failure. Always carries
-        the fixed research-only disclaimer.
+        Immediately: ``{"job_id", "status": "running", "poll_tool":
+        "get_experiment_result", "message"}``. Poll
+        ``get_experiment_result(job_id)`` — on ``"done"`` its ``result`` is the
+        grounded-evidence projection (carrying the fixed research-only
+        disclaimer), on ``"error"`` its ``result`` is ``{"error", "message",
+        "status_code"}``. Obviously invalid input is rejected inline (no job).
     """
     bad = _validate_text(question, "question")
     if bad is not None:
         return bad
-    brief, error = await _await_with_heartbeat(
-        _call_engine_safely(question, None), ctx, "search_grounded_evidence"
-    )
-    if error is not None:
-        return error
-    assert brief is not None
-    return _grounded_evidence_projection(brief)
+    return _submit_job(_search_grounded_evidence_result(question), "search_grounded_evidence")
+
+
+@mcp_app.tool()
+async def get_experiment_result(job_id: str) -> dict[str, Any]:
+    """Poll for the result of a run started by ``generate_experiment`` or
+    ``search_grounded_evidence`` (both are async: they return a ``job_id`` and
+    run the ~60-120s pipeline in the background). Call this every ~5s with that
+    ``job_id`` until it is no longer ``"running"``.
+
+    Args:
+        job_id: The ``job_id`` returned by ``generate_experiment`` /
+            ``search_grounded_evidence``.
+
+    Returns:
+        - still working: ``{"status": "running", "job_id"}`` — poll again.
+        - finished ok:   ``{"status": "done", "job_id", "result": <the full
+          TransBrief, or the evidence projection>}``.
+        - failed:        ``{"status": "error", "job_id", "result": {"error",
+          "message", "status_code"}}``.
+        - unknown/expired ``job_id``: ``{"error": "unknown_job", "message",
+          "status_code": 404}`` — finished results are retained ~30 min
+          (``MCP_JOB_TTL_SECONDS``) after completion, then evicted.
+    """
+    _evict_expired_jobs()
+    job = _JOBS.get(job_id)
+    if job is None:
+        return _clean_error(
+            404,
+            "unknown_job",
+            f"No job with id {job_id!r}. It may have finished and been evicted after "
+            f"{int(_JOB_TTL_SECONDS)}s, or the id is wrong. Start a new run with "
+            f"generate_experiment or search_grounded_evidence.",
+        )
+    if job.status in ("queued", "running"):
+        return {"status": "running", "job_id": job_id}
+    return {"status": job.status, "job_id": job_id, "result": job.result}
 
 
 def main() -> None:

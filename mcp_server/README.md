@@ -62,15 +62,20 @@ Never a raw traceback. `server.py` catches the engine's own `TransBenchLLMError`
 
 Both tools run the **full** pipeline: ~13 LLM calls across three tiers — **Haiku** (grade / entail / assemble / neutralize), **Sonnet** (decompose / novelty), **Opus** (`MODEL_DEEP`: hypothesize + experiment-design) — plus live PubMed and, when a candidate is selected, a live GEO content-verification fetch (`BUILD_SPEC.md` §9). Opus on the two creative steps raises per-run cost (grading, the many-call step, stays on Haiku, so it's bounded); dial it off with `MODEL_DEEP=claude-sonnet-4-6`.
 
-## Run time & keepalive
+## Run time & async submit-poll
 
-That same full pipeline means a run legitimately takes **~60–120s** (longer on a cold first call). There is **no 60s timeout in this server** — nginx is `3600s`, the per-model-call timeout is `90s`, engine import is <1s; the ~60s an MCP client may hit is *its own* wait-for-result timeout. So instead of a bigger number, each tool emits an **MCP progress notification every `MCP_HEARTBEAT_SECONDS` (default 10s)** while the engine runs (`_await_with_heartbeat` in `server.py`) — the MCP-standard keepalive for long-running tools, so the client keeps the call open. It's best-effort and never affects the result: `report_progress` is a documented no-op if the client sent no `progressToken`, and any notification error is swallowed. The injected `ctx: Context` parameter is hidden from the tools' public schema (clients still see only `observation`/`focus_drug` and `question`).
+That same full pipeline means a run legitimately takes **~60–120s** (longer on a cold first call). There is **no 60s timeout in this server** — nginx is `3600s`, the per-model-call timeout is `90s`, engine import is <1s; the ~60s an MCP client may hit is *its own* wait-for-result timeout for a **single** call — a hard ceiling a progress heartbeat does not reset (an earlier keepalive attempt here proved useless for exactly that reason). So the tools do not block on the engine. They are **async (submit + poll)**:
+
+- `generate_experiment` / `search_grounded_evidence` start a background job and return in **<1s** with `{"job_id", "status": "running", "poll_tool": "get_experiment_result", "message"}`.
+- **`get_experiment_result(job_id)`** is polled (~every 5s) and returns `{"status": "running"}` until done, then `{"status": "done", "result": <brief / projection>}` or `{"status": "error", "result": {"error","message","status_code"}}`. Unknown/expired ids get a clean `unknown_job` 404.
+
+Each call is sub-second, so no single call ever nears the client ceiling regardless of how long or cold the run is. The job is owned by an in-process registry (`_submit_job` in `server.py`), so a client dropping the fast submit call does **not** orphan the run — it completes and waits for the poll. Scale guards: `MCP_MAX_CONCURRENT_JOBS` (default `4`) caps simultaneous engine runs via a semaphore; `MCP_JOB_TTL_SECONDS` (default `1800`) evicts finished results so the registry stays bounded. (In-memory is correct for this single-process server; a multi-worker deployment would move the registry to shared storage, e.g. Redis.)
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `server.py` | `FastMCP("transbench")` app; both tools; error handling |
+| `server.py` | `FastMCP("transbench")` app; the three tools (2 submit + `get_experiment_result` poll); job registry; error handling |
 | `run_http.sh` | Launch over streamable-HTTP (`127.0.0.1:8500/mcp`) — what CS connects to; sets the Opus deep tier |
 | `run_stdio.sh` | Launch over stdio (direct MCP clients; not usable as a Claude Science connector) |
 | `ask.sh` / `ask.py` | Fully-local: grounded brief → paste-ready `claude_science_prompt` |

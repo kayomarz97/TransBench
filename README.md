@@ -306,15 +306,19 @@ bit-identical, so the *reproducible artifact* is the experiment (named dataset +
 
 ### MCP server
 
-[`mcp_server/server.py`](mcp_server/server.py) is a FastMCP server (`mcp==1.28.1`) exposing two tools
+[`mcp_server/server.py`](mcp_server/server.py) is a FastMCP server (`mcp==1.28.1`) exposing three tools
 over **streamable-HTTP** (how Claude Science connects — as a local URL connector, `localhost:8500`)
-and **stdio** (for direct/embedded use):
+and **stdio** (for direct/embedded use). A run legitimately takes ~60–120s (longer cold), beyond an MCP
+client's single-call wait-for-result timeout, so the two generators are **async (submit + poll)**:
 
-- **`generate_experiment(observation, focus_drug="")`** — the full grounded `TransBrief`.
-- **`search_grounded_evidence(question)`** — the same engine run, reshaped into a lighter
-  grounded-evidence projection.
+- **`generate_experiment(observation, focus_drug="")`** — starts the run, returns a `job_id` in <1s;
+  the finished payload is the full grounded `TransBrief`.
+- **`search_grounded_evidence(question)`** — same engine run, returns a `job_id`; finished payload is a
+  lighter grounded-evidence projection.
+- **`get_experiment_result(job_id)`** — poll (<1s each) until `status` is `"done"` (payload in
+  `result`) or `"error"`, so no single call ever nears the client timeout however long the run takes.
 
-Both call `engine.run_transbench` directly (no duplicated logic) and catch `create_llm`'s
+Both generators call `engine.run_transbench` directly (no duplicated logic) and catch `create_llm`'s
 `fastapi.HTTPException` (missing/invalid key, bad model) to return a clean structured error.
 
 ### Cost

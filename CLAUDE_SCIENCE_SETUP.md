@@ -95,16 +95,25 @@ Connector URL = `https://mcp.yourdomain/mcp` (add a Cloudflare Access policy for
 ## "The first call takes a while / times out and I have to rerun"
 A full run is **~13 model calls** (Opus on the two hardest steps: hypothesize + experiment-design)
 plus **live PubMed** and a **GEO** content fetch, so it legitimately takes **~60–120s** — and longer
-on a **cold** first call. That ~60s ceiling is **not a server timeout** (nginx is `3600s`, the
-per-model-call timeout is `90s`, engine import is <1s): it is **Claude Science's own wait-for-result
-timeout**. There is no single number in this repo to raise.
+on a **cold** first call. That is longer than **Claude Science's own wait-for-result timeout** for a
+*single* tool call (~60s, a hard ceiling; it is **not** a server timeout — nginx is `3600s`, the
+per-model-call timeout is `90s`, engine import is <1s). A progress-notification keepalive does **not**
+move that ceiling (CS does not reset its timeout on progress), so the tools no longer block on the run.
 
-Instead, while the engine runs each tool now emits an **MCP progress notification every 10s**
-(`MCP_HEARTBEAT_SECONDS`, set in `run_http.sh` env if you want to change it) — the MCP-standard
-keepalive that tells the client "still working," so CS holds the call open well past 60/120s. Nothing
-about the result changes; it only keeps the connection visibly active.
-- If a cold call ever *still* times out, just **run it once more** — the process is warm and finishes fast.
-- After `systemctl restart transbench-mcp` (e.g. following a change), the *next* call is cold again by design.
+Instead they are **async (submit + poll)**:
+1. `generate_experiment` (or `search_grounded_evidence`) returns in **<1s** with
+   `{"job_id", "status": "running", "poll_tool": "get_experiment_result", ...}`.
+2. Call **`get_experiment_result(job_id)`** every ~5s. It returns `{"status": "running"}` while the
+   pipeline works, then `{"status": "done", "result": <brief>}` (or `{"status": "error", "result":
+   {…}}`). Each call is sub-second, so **no single call ever approaches the ~60s ceiling** — the run can
+   take 60s, 120s, or longer cold and it never times out.
+
+The in-conversation CS agent polls automatically (the tool descriptions tell it to). Tuning knobs
+(leave default unless you have reason not to), set in the service / `run_http.sh` env:
+`MCP_MAX_CONCURRENT_JOBS` (default `4`, max simultaneous engine runs) and `MCP_JOB_TTL_SECONDS`
+(default `1800`, how long a finished result stays pollable before eviction). After
+`systemctl restart transbench-mcp` the next run is cold again by design — but cold no longer means a
+timeout, just a longer poll.
 
 ## Distribution (self-host + BYOK)
 TransBench is self-contained (`src/vendored/`) — a clone needs no external `med-ai-project`:
