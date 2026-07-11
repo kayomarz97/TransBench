@@ -21,16 +21,19 @@ It works for **any** disease, drug, or mechanism — not one fixed specialty. Th
 type 2 diabetes, resistant hypertension, melanoma, and rheumatoid arthritis, and the same pipeline
 handles whatever you paste in.
 
+<img src="docs/img/claude-science-flow.svg" alt="How the TransBench MCP connector runs: a free-text clinician observation flows through the TransBench engine (8 agents, 3 rigor gates) to a grounded brief, then a content-verified dataset and a paste-ready claude_science_prompt that Claude Science turns into a reproducible figure. The connector exposes generate_experiment, search_grounded_evidence, and get_experiment_result." width="860">
+
 > [!IMPORTANT]
 > **Research tool only.** TransBench never gives diagnosis, drug selection, or dosing advice. Every
 > response carries a fixed disclaimer: *"Research hypothesis generation only. Not clinical,
 > diagnostic, or prescribing advice."*
 
 > [!NOTE]
-> **Nothing in this README is mocked-up.** Every screenshot, PMID, count, and experiment is read
-> straight from real captured runs committed in [`snapshots/`](snapshots/). The images are generated
-> from those files by [`docs/generate_readme_assets.py`](docs/generate_readme_assets.py). Anyone can
-> reproduce them **byte-identical, with no API key** — see [Reproducibility](#reproducibility--no-fake-data).
+> **Nothing in this README is mocked-up.** Every PMID, count, and experiment on the data cards is read
+> straight from real captured runs committed in [`snapshots/`](snapshots/); the flow, pipeline, and
+> architecture diagrams encode the system's real structure. All figures are generated deterministically
+> by [`docs/generate_readme_assets.py`](docs/generate_readme_assets.py) — anyone can reproduce them
+> **byte-identical, with no API key** — see [Reproducibility](#reproducibility--no-fake-data).
 
 ---
 
@@ -86,6 +89,7 @@ print(brief.top_experiment.claude_science_prompt)
 - [Reusing Iatronix, read-only](#reusing-iatronix-read-only)
 - [Tests](#tests)
 - [Repo layout](#repo-layout)
+- [Future plans & scalability](#future-plans--scalability)
 - [Scope, safety, and status](#scope-safety-and-status)
 
 ---
@@ -122,26 +126,7 @@ two — because no hypothesis cleared the evidence bar. That refusal is the feat
 A clinician's sentence goes in; a grounded, testable brief comes out. Eight cooperating agents do
 the work, with three hard quality gates in the middle that anything unsupported cannot pass.
 
-```mermaid
-flowchart TD
-    A["🧑‍⚕️ Clinician observation<br/>free text · any disease, drug, mechanism"] --> B["1 · Decompose<br/>biological axes + condition anchor"]
-    B --> C["2 · Hypothesize<br/>≤ 3 falsifiable mechanisms"]
-    C --> D["3 · Retrieve · multi-database<br/>PubMed + trials + Europe PMC<br/>LLM-written queries · support & contradiction"]
-    D --> E["4 · Grade<br/>map each source → supports / refutes + evidence grade"]
-    E --> F{"5–6 · Rigor gates"}
-    F --> G["Entailment<br/>does the source <i>actually</i> support the claim?"]
-    F --> H["Grounding gate<br/>no resolvable citation → dropped"]
-    F --> I["Novelty guard<br/>textbook fact → demoted, never shipped as novel"]
-    G --> J{"Any hypothesis<br/>open_question <b>and</b> grounded?"}
-    H --> J
-    I --> J
-    J -- yes --> K["7 · Design experiment<br/>named, <b>content-verified</b> dataset<br/>+ ordered runnable protocol"]
-    J -- no --> L["No experiment shipped<br/>honest refusal, not a fabrication"]
-    K --> M["8 · Assemble TransBrief"]
-    L --> M
-    M --> N["📋 TransBrief<br/>axes · graded hypotheses · references<br/>top_experiment · claude_science_prompt"]
-    N --> O["🔬 Paste into Claude Science<br/>→ reproducible figure"]
-```
+<img src="docs/img/pipeline.svg" alt="TransBench pipeline: a free-text clinician observation is decomposed into biological axes, expanded into up to three falsifiable hypotheses, then graded against multi-database retrieval (PubMed, ClinicalTrials.gov, Europe PMC). Three rigor gates — entailment, grounding, and novelty — reject anything unsupported. If any hypothesis is both an open question and grounded, a content-verified experiment is designed; otherwise no experiment is shipped. Everything is assembled into a schema-valid TransBrief with a paste-ready claude_science_prompt." width="840">
 
 | Stage | Agent | Does |
 |---|---|---|
@@ -248,35 +233,7 @@ TransBench is a **standalone repo** that reuses the mature grounding/retrieval s
 **Iatronix** backend as a **read-only** dependency — it imports DB-free leaf functions and never
 modifies Iatronix (enforced by a baseline-diff guard).
 
-```mermaid
-flowchart LR
-    subgraph client["MCP client"]
-      CS["Claude Science<br/>(or HTTP / direct CLI)"]
-    end
-    subgraph tb["TransBench · this repo"]
-      MCP["mcp_server<br/>FastMCP · stdio + HTTP"]
-      ENG["engine.run_transbench<br/>8-agent LangGraph pipeline"]
-      MODE["modes<br/>live · snapshot · golden"]
-      MCP --> ENG
-      ENG -.-> MODE
-    end
-    subgraph ia["Iatronix backend · READ-ONLY"]
-      LEAF["DB-free leaf functions<br/>fetch_evidence_data · rank_article_list<br/>grounding_gate · create_llm · neutralize_query"]
-    end
-    subgraph ext["External services"]
-      PUB["PubMed /<br/>ClinicalTrials.gov"]
-      EPMC["Europe PMC /<br/>Semantic Scholar"]
-      DS["GEO /<br/>Tabula Sapiens"]
-      ANTH["Anthropic API<br/>(BYOK)"]
-    end
-    CS -->|"generate_experiment(observation)"| MCP
-    ENG -->|"import · never write"| LEAF
-    LEAF --> PUB
-    ENG -->|"multi-DB search · search_sources"| EPMC
-    ENG -->|"content-verify accession"| DS
-    ENG -->|"create_llm · temp 0"| ANTH
-    ENG -->|"TransBrief"| MCP -->|"JSON"| CS
-```
+<img src="docs/img/architecture.svg" alt="TransBench architecture: an MCP client (Claude Science, HTTP, or CLI) calls generate_experiment on the TransBench repo, whose FastMCP server drives an 8-agent LangGraph engine with live, snapshot, and golden modes. The engine imports DB-free leaf functions from the Iatronix backend read-only (never writing) and queries external services — PubMed/ClinicalTrials.gov, Europe PMC/Semantic Scholar, GEO/Tabula Sapiens, and the Anthropic API via BYOK — returning a TransBrief as JSON." width="860">
 
 ### The reuse seam
 
@@ -411,8 +368,9 @@ matching observation — a mismatch transparently falls back to the live pipelin
 
 ## Reproducibility — no fake data
 
-- **Everything shown is real.** Screenshots and numbers come from committed `snapshots/*.json`; the
-  images are regenerated by `python docs/generate_readme_assets.py` from those files.
+- **Everything shown is real.** The data cards' numbers come from committed `snapshots/*.json`; the
+  flow / pipeline / architecture diagrams encode the real system structure. All figures regenerate
+  offline via `python docs/generate_readme_assets.py`.
 - **Anyone reproduces the demos, free.** `TRANSBENCH_MODE=golden` replays the committed briefs
   byte-identical with no API key.
 - **Live results are close, not identical.** Live runs re-derive results against *today's* PubMed, so
@@ -459,11 +417,73 @@ transbench/
 ├─ src/transbench/     # config, schemas, prompts, reuse seam, 8 agents, rigor, LangGraph engine
 ├─ mcp_server/         # FastMCP server (stdio + HTTP), run scripts, connector manifest
 ├─ snapshots/          # committed golden briefs (hypertension, T2D, melanoma, RA) + retrieval snapshot
-├─ docs/               # generate_readme_assets.py + img/ (SVG cards, generated from snapshots/)
+├─ docs/               # generate_readme_assets.py + img/ (SVG cards & diagrams, generated offline)
 ├─ tests/              # fixtures + 206-test suite
 ├─ BUILD_SPEC.md       # full design spec        KICKOFF.md  # phase-by-phase build plan
 ├─ CLAUDE_SCIENCE_SETUP.md   PLAN.md   .env.example
 ```
+
+---
+
+## Future plans & scalability
+
+> **Roadmap — not shipped yet.** TransBench today is a single-run connector. The items below turn it
+> into a durable, multi-user, clinic-ready tool. None of them change the current engine's behaviour or
+> its safety posture: each is **additive**, built the same way the core was (plan first, verify-gated),
+> and stays **standalone** — it never touches Iatronix.
+
+**Text it like you'd text a colleague — Slack, WhatsApp, Telegram, or any messaging app.**
+A clinician shouldn't need a terminal. *In plain terms:* send an observation from the messaging app you
+already use, and the grounded brief comes back as a reply. *Technically:* a thin, stateless gateway maps
+an inbound message to `generate_experiment` (async submit + poll) and formats the returned `TransBrief`
+back — the engine is unchanged, because it already speaks MCP over HTTP.
+
+**Batch processing.**
+*In plain terms:* hand it a whole list — a clinic's backlog of interesting cases — and get a brief for
+each, overnight. *Technically:* a queue in front of the existing async job API, fanning out under the
+current concurrency caps, deduplicated by observation hash, resumable, with results written to the brief
+store below. It reuses the submit/poll design; no run logic is duplicated.
+
+**Scrub patient identifiers before anything is stored (de-identify on input).**
+This is the single biggest gate between a demo and a real clinic deployment. *In plain terms:* before a
+single word is saved or sent, names, MRNs, dates, and other identifiers are stripped, so only the
+de-identified clinical picture is ever kept. *Technically:* a de-identification guard at the ingress
+boundary (PHI/PII detection + redaction) that runs **before** persistence and before any model call;
+only de-identified text plus a one-way hash (for deduplication) is ever stored.
+
+**Healthcare-grade compliance.**
+*In plain terms:* the guardrails a hospital needs before it will trust a tool. *Technically:* encryption
+at rest and in transit, per-user authentication and access control, an immutable audit log (the
+`run_manifest` is already an audit seed), data-retention controls, and signed agreements (BAAs) with
+every processor (model provider, hosting) — with region-pinning and no-training guarantees on any
+PHI-adjacent path.
+
+**Persistence — from a one-shot tool into a compounding knowledge asset.**
+*In plain terms:* save every brief so the tool remembers, spots duplicates, and can tell you later when
+new evidence appears. *Technically:* an append-only, content-hash-keyed brief store with two derived
+indexes — relational/JSONB for filtering and a small vector index over observations and hypotheses for
+semantic dedup. It gets its **own** lightweight store and never reuses the Iatronix database. This
+unlocks:
+
+- **Re-grounding watchlist** — a stored hypothesis becomes a standing query; retrieval re-runs on a
+  schedule and the messaging front-door notifies you when a previously-ungrounded question finally
+  clears the evidence bar.
+- **Institutional memory & portfolio view** — a lab accumulates a searchable corpus of
+  observation → hypothesis → experiment, and a PI sees every generated experiment ranked by
+  grounding / novelty / feasibility.
+- **Feedback loop** — capture which experiments were actually run and whether they confirmed or refuted,
+  to finally measure the tool's real hit-rate.
+
+**Meet teams where they already work.**
+*In plain terms:* drop briefs straight into the tools labs already use. *Technically:* export to an ELN
+(Benchling / LabArchives), a "hypothesis backlog" in an issue tracker or Notion, and an optional
+read-only dashboard over the store.
+
+**Phased rollout:** **A** persist + de-identification guard → **B** semantic search & dedup →
+**C** re-grounding watchlist → **D** portfolio & feedback → **E** integrations, messaging, and batch.
+
+> The honest caveats carry forward at every phase: TransBench generates **hypotheses, not answers**;
+> **grounded ≠ correct**; it is **not clinical**; and sparse domains legitimately yield less.
 
 ---
 
