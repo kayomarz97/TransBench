@@ -230,7 +230,7 @@ produced no experiment.
 ### Architecture
 
 TransBench is a **standalone repo** that reuses the mature grounding/retrieval stack of the
-**Iatronix** backend as a **read-only** dependency — it imports DB-free leaf functions and never
+**[Iatronix](https://github.com/kayomarz97/iatronix)** backend ([med.kayomarz.com](https://med.kayomarz.com)) as a **read-only** dependency — it imports DB-free leaf functions and never
 modifies Iatronix (enforced by a baseline-diff guard).
 
 <img src="docs/img/architecture.svg" alt="TransBench architecture: an MCP client (Claude Science, HTTP, or CLI) calls generate_experiment on the TransBench repo, whose FastMCP server drives an 8-agent LangGraph engine with live, snapshot, and golden modes. The engine imports DB-free leaf functions from the Iatronix backend read-only (never writing) and queries external services — PubMed/ClinicalTrials.gov, Europe PMC/Semantic Scholar, GEO/Tabula Sapiens, and the Anthropic API via BYOK — returning a TransBrief as JSON." width="860">
