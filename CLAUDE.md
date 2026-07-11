@@ -71,8 +71,14 @@ deliberately **not** auto-loaded, to save context).
 | **`docs-researcher`** | about to touch an unfamiliar API/service/library | Reads official docs, extracts exact params/tool schemas/version constraints, records them in the playbook. |
 | **`offline-bench-runner`** | you changed code and need to confirm nothing broke | Runs `pytest` + a golden-mode smoke run (offline, no key), reports pass/fail honestly. |
 | **`secret-scanner`** | before any `git push` (or when unsure what's staged) | Scans staged/tracked content for secrets & PII, flags findings, asks before proceeding. |
+| **`deep-reasoning`** | a problem is genuinely hard (subtle correctness, tricky algorithm, gnarly multi-file diagnosis, architecture tradeoff) | Runs on **Fable** (a more capable tier than the Opus main) and returns a rigorous, evidence-backed solution + reasoning. Delegate the hard 10%; keep routine work on the main session. |
 
 Definitions live in `.claude/agents/`. Invoke via the Agent/Task tool by name.
+
+**Model routing.** Run the main session on **Opus** (`claude --model opus`) so routine work stays fast
+and cheap, and **escalate genuinely hard, self-contained reasoning to the `deep-reasoning` sub-agent
+(Fable)**. Don't over-delegate — most work should finish on the main session; reach for Fable only when
+the problem is actually hard, and hand it the exact files/symptoms (it starts with fresh context).
 
 ## Learn from mistakes (self-updating)
 
