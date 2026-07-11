@@ -29,7 +29,7 @@ import asyncio
 import json
 from typing import Any
 
-from transbench.rigor import run_entailment
+from transbench.rigor import _ensure_evidence_citation, run_entailment
 from transbench.schemas import EvidenceItem, Hypothesis, Reference
 
 
@@ -203,3 +203,41 @@ def test_run_entailment_empty_input_returns_empty_list_without_calling_llm() -> 
 
     assert updated == []
     assert fake_llm.calls == []
+
+
+# ---------------------------------------------------------------------------
+# CODE_REVIEW Finding 3 — novelty citation must be enforced for ALL evidence
+# identifiers (PubMed pmid OR trial/DOI url), not pmid-only. Same ``pmid or
+# url`` space as ``_correlation_id`` above, so an experiment grounded on an
+# NCT/DOI record still yields an AUDITABLE novelty_reason (BUILD_SPEC.md §6(3)).
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_evidence_citation_cites_url_only_nct_evidence() -> None:
+    """THE Finding 3 proof: a url-bearing, pmid-less (NCT trial / DOI) item
+    whose verdict the model didn't cite gets its URL appended — previously the
+    pmid-only enforcement returned the reason UNCITED for exactly this evidence
+    (often the highest-grade available), defeating §6(3)'s auditability MUST."""
+    reason = "Open question — no prior study tested this population."
+    out = _ensure_evidence_citation(reason, [_nct_item("supports")])
+    assert _NCT_URL in out, "url-only (NCT/DOI) evidence must be cited, not silently dropped"
+    assert out == f"{reason} (citing {_NCT_URL})"
+
+
+def test_ensure_evidence_citation_prefixes_pmid_and_short_circuits_if_already_cited() -> None:
+    """A pmid item is cited as ``PMID <n>``; and when the model already
+    referenced an identifier in its own prose, nothing is appended (no
+    double-citation) — the control path that must keep working."""
+    appended = _ensure_evidence_citation("Partially supported.", [_pmid_item("supports")])
+    assert f"PMID {_CONTROL_PMID}" in appended
+    assert appended.endswith(f"(citing PMID {_CONTROL_PMID})")
+
+    already = f"Supported directly by PMID {_CONTROL_PMID}."
+    assert _ensure_evidence_citation(already, [_pmid_item("supports")]) == already  # unchanged
+
+
+def test_ensure_evidence_citation_no_evidence_returns_reason_unchanged() -> None:
+    """Genuinely zero evidence → nothing to cite → reason returned verbatim
+    (e.g. a hypothesis the retrieval/grade step degraded to empty)."""
+    reason = "Unsupported: no evidence retrieved for this hypothesis."
+    assert _ensure_evidence_citation(reason, []) == reason

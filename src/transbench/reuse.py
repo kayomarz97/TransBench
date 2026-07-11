@@ -1,11 +1,18 @@
 """reuse.py — the SINGLE seam between TransBench and Iatronix (BUILD_SPEC.md §2).
 
-Path A (locked in Phase 0, see PLAN.md): the Iatronix backend is installed
-editable + ``--no-deps`` into this repo's own venv, so ``from app.services...
-import ...`` resolves to the live, read-only Iatronix source tree. Path B
-(vendoring) is the fallback below — inert today (no ``vendored/`` package
-exists in this repo; Python only evaluates the ``except`` body if the ``try``
-raises ``ImportError``) — kept for spec fidelity and as the seam that absorbs
+Two backends, one seam. The mechanism is a plain ``try/except ImportError``:
+the ``try`` imports from an installed Iatronix (``from app.services...
+import ...``); the ``except`` imports the same names from the bundled
+``vendored/`` mirror. So **Path B (vendoring) is the default, self-contained
+path** — in a fresh clone (and the offline bench) no external
+``med-ai-project`` is installed, the ``try`` raises ``ImportError``, and
+``src/vendored/`` (a read-only Iatronix mirror shipped in this repo:
+``pyproject.toml`` includes it, ``vendored/__init__`` re-exports every symbol
+below) serves every import. **Path A (installed Iatronix) is the opt-in
+override**: install the real backend editable + ``--no-deps`` into this venv
+and the ``try`` succeeds, so that live tree wins instead. ``REUSE_SOURCE``
+records which path was taken (``"vendored"`` by default,
+``"installed_iatronix"`` when overridden) — the single seam that also absorbs
 a future Iatronix breakage without touching any other file in this repo.
 
 Only DB-free leaf functions/containers are imported here — see KICKOFF.md

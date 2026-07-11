@@ -52,7 +52,7 @@ _NOVELTY_VALUES = frozenset(get_args(NoveltyVerdict))
 
 # ---------------------------------------------------------------------------
 # Agent 6(1) — Rigor Gate: dedicated, batched-per-hypothesis entailment
-# (Haiku, config.MODEL_CHEAP). BUILD_SPEC.md §6(1).
+# (mechanical tier, config.MODEL_CHEAP). BUILD_SPEC.md §6(1).
 # ---------------------------------------------------------------------------
 
 
@@ -222,27 +222,39 @@ def compute_grounding(evidence_items: list[EvidenceItem]) -> tuple[bool, int]:
 
 
 # ---------------------------------------------------------------------------
-# Agent 5 — Novelty Checker (Sonnet, config.MODEL_REASONING). BUILD_SPEC.md §5.
+# Agent 5 — Novelty Checker (reasoning tier, config.MODEL_REASONING). BUILD_SPEC.md §5.
 # ---------------------------------------------------------------------------
 
 
-def _ensure_pmid_citation(novelty_reason: str, evidence_items: list[EvidenceItem]) -> str:
+def _ensure_evidence_citation(novelty_reason: str, evidence_items: list[EvidenceItem]) -> str:
     """BUILD_SPEC.md §6(3): "novelty_reason MUST cite specific evidence items
-    (PMIDs) so the verdict is auditable, never an unsupported LLM assertion."
-    This is a ``MUST``, so it is ENFORCED here, not just requested in the
-    prompt: if the model's own prose doesn't already mention at least one
-    real PMID from the evidence it was given, a citation is appended
-    deterministically — guarantees auditability at the OUTPUT level
-    regardless of whether the LLM remembered to do it (same philosophy as
-    the Phase 3 ``bears_on_hypothesis`` fix: enforce structurally, don't
-    just ask nicely).
+    so the verdict is auditable, never an unsupported LLM assertion." This is a
+    ``MUST``, so it is ENFORCED here, not just requested in the prompt: if the
+    model's own prose doesn't already reference at least one real evidence
+    identifier it was given, a citation is appended deterministically —
+    guarantees auditability at the OUTPUT level regardless of whether the LLM
+    remembered to do it (same philosophy as the Phase 3 ``bears_on_hypothesis``
+    fix: enforce structurally, don't just ask nicely).
+
+    Citation identifier space (CODE_REVIEW Finding 3): a PubMed ``pmid`` when
+    present, else the evidence's ``url`` — a ClinicalTrials.gov / DOI / preprint
+    record. This is the SAME ``pmid or url`` space :func:`_correlation_id` and
+    the grader already treat as first-class, so a hypothesis grounded ONLY on a
+    trial or DOI (often the highest-grade evidence available) still yields an
+    auditable verdict rather than a silently uncited one — the exact outcome
+    §6(3) exists to prevent. (``schemas.Reference`` carries no ``nct_id`` field;
+    the trial/DOI identifier lives in ``url``.)
     """
-    real_pmids = [ev.reference.pmid for ev in evidence_items if ev.reference.pmid]
-    if not real_pmids:
+    cites = [
+        ev.reference.pmid or ev.reference.url
+        for ev in evidence_items
+        if (ev.reference.pmid or ev.reference.url)
+    ]
+    if not cites:
         return novelty_reason  # nothing to cite -- e.g. genuinely zero evidence retrieved
-    if any(pmid in novelty_reason for pmid in real_pmids):
+    if any(cite in novelty_reason for cite in cites):
         return novelty_reason  # the model already cited at least one -- did its job
-    cited = ", ".join(f"PMID {p}" for p in real_pmids[:3])
+    cited = ", ".join(f"PMID {c}" if c.isdigit() else c for c in cites[:3])
     return f"{novelty_reason} (citing {cited})"
 
 
@@ -256,8 +268,8 @@ async def run_novelty(
     real evidence). Takes a PRE-BUILT client (agents 1-2's convention).
 
     Returns ``(novelty, novelty_reason)`` with ``novelty_reason`` GUARANTEED
-    to cite a real PMID from the evidence when any exists (see
-    :func:`_ensure_pmid_citation`).
+    to cite a real evidence identifier (a PMID, or a trial/DOI url) when any
+    exists (see :func:`_ensure_evidence_citation`).
     """
     lines = [f"Hypothesis: {hypothesis.statement}", f"Prediction: {hypothesis.prediction}"]
     if evidence_items:
@@ -286,7 +298,7 @@ async def run_novelty(
     novelty_reason = str(item.get("novelty_reason") or "").strip()
     if not novelty_reason:
         novelty_reason = f"Novelty classified as {novelty} (no reason text returned by the model)."
-    novelty_reason = _ensure_pmid_citation(novelty_reason, evidence_items)
+    novelty_reason = _ensure_evidence_citation(novelty_reason, evidence_items)
 
     return novelty, novelty_reason
 

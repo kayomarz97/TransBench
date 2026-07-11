@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import logging
 from typing import Any, Optional, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -32,6 +33,8 @@ from transbench.schemas import (
     Hypothesis,
     TransBrief,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TransBenchState(TypedDict, total=False):
@@ -58,6 +61,7 @@ class TransBenchState(TypedDict, total=False):
     user_key: Optional[str]
     user_provider: str
     model_reasoning: str
+    model_deep: str
     model_cheap: str
     retrieval_snapshot: Optional[dict]
     run_started_at: str
@@ -74,7 +78,7 @@ class TransBenchState(TypedDict, total=False):
 
 
 async def _decompose_node(state: TransBenchState) -> TransBenchState:
-    """Agent 1 — Decomposer (Sonnet, ``config.MODEL_REASONING``). Real LLM call —
+    """Agent 1 — Decomposer (reasoning tier, ``config.MODEL_REASONING``). Real LLM call —
     builds its own temperature-0 client via :func:`agents.build_llm` for
     this one call (BUILD_SPEC.md §5: "Build clients once").
 
@@ -102,8 +106,8 @@ async def _decompose_node(state: TransBenchState) -> TransBenchState:
 
 
 async def _hypothesize_node(state: TransBenchState) -> TransBenchState:
-    """Agent 2 — Hypothesis Generator (Opus, ``config.MODEL_DEEP``). Real LLM
-    call — grounded in agent 1's axes output. Runs on the deep-reasoning tier:
+    """Agent 2 — Hypothesis Generator (deep-reasoning tier, ``config.MODEL_DEEP``). Real
+    LLM call — grounded in agent 1's axes output. Runs on the deep-reasoning tier:
     the creative core (novel, falsifiable mechanisms) is the biggest quality lever."""
     llm = agents.build_llm(
         state.get("model_deep", config.MODEL_DEEP),
@@ -161,15 +165,33 @@ async def _retrieve_and_grade_node(state: TransBenchState) -> TransBenchState:
                 condition_anchor=condition_anchor,
                 retrieval_snapshot=retrieval_snapshot,
             )
-            evidence = await agents.run_grade(
-                hypothesis,
-                retrieval.ranked,
-                retrieval.registry,
-                retrieval.fd,
-                user_key,
-                user_provider=user_provider,
-                model_id=model_cheap,
-            )
+            # Per-hypothesis error isolation (CODE_REVIEW Finding 1): run_retrieve
+            # already never raises, but run_grade CAN raise TransBenchLLMError on a
+            # malformed grader response (agents._parse_json/_coerce_list). Without
+            # this guard a single bad grader reply fails the whole asyncio.gather
+            # batch and discards every OTHER hypothesis's completed work. Degrade
+            # just this hypothesis to zero graded evidence instead — the rigor node
+            # then classifies it "unsupported"/ungrounded exactly as it does a
+            # genuinely zero-evidence hypothesis. Extends run_retrieve's own
+            # "never crash the batch" contract to the grade step.
+            try:
+                evidence = await agents.run_grade(
+                    hypothesis,
+                    retrieval.ranked,
+                    retrieval.registry,
+                    retrieval.fd,
+                    user_key,
+                    user_provider=user_provider,
+                    model_id=model_cheap,
+                )
+            except agents.TransBenchLLMError:
+                logger.warning(
+                    "retrieve_and_grade: grader failed for hypothesis %r — "
+                    "degrading to zero graded evidence (run continues)",
+                    hypothesis.id,
+                    exc_info=True,
+                )
+                evidence = []
         # Retrieval snapshot for run_manifest (BUILD_SPEC.md §3/§9): the
         # neutral + pubmed query and the FULL ranked/capped abstract dicts
         # (pmid/title/year/abstract text/journal/etc. — whatever
@@ -226,8 +248,9 @@ async def _rigor_and_novelty_node(state: TransBenchState) -> TransBenchState:
     frames dedicated entailment as the authoritative signal ("closes the gap
     ... existence ≠ support").
 
-    A hypothesis with zero evidence still gets a real novelty call (Sonnet
-    correctly classifies it "unsupported" given "no evidence retrieved" —
+    A hypothesis with zero evidence still gets a real novelty call (the
+    reasoning tier correctly classifies it "unsupported" given "no evidence
+    retrieved" —
     this keeps every hypothesis evaluated the same way) but SKIPS the
     entailment call entirely (``run_entailment([])`` returns ``[]`` with no
     LLM call — nothing to classify).
@@ -243,14 +266,44 @@ async def _rigor_and_novelty_node(state: TransBenchState) -> TransBenchState:
 
     async def _one(hypothesis: Hypothesis) -> tuple[str, dict]:
         evidence = evidence_by_hyp_id.get(hypothesis.id, [])
-        async with semaphore:
-            entailment_llm = agents.build_llm(model_cheap, user_key, user_provider)
-            evidence = await rigor.run_entailment(hypothesis, evidence, entailment_llm)
+        try:
+            async with semaphore:
+                entailment_llm = agents.build_llm(model_cheap, user_key, user_provider)
+                evidence = await rigor.run_entailment(hypothesis, evidence, entailment_llm)
 
-            grounded, grounded_supporting_count = rigor.compute_grounding(evidence)
+                grounded, grounded_supporting_count = rigor.compute_grounding(evidence)
 
-            novelty_llm = agents.build_llm(model_reasoning, user_key, user_provider)
-            novelty, novelty_reason = await rigor.run_novelty(hypothesis, evidence, novelty_llm)
+                novelty_llm = agents.build_llm(model_reasoning, user_key, user_provider)
+                novelty, novelty_reason = await rigor.run_novelty(hypothesis, evidence, novelty_llm)
+        except agents.TransBenchLLMError:
+            # Per-hypothesis error isolation (CODE_REVIEW Finding 1): a malformed
+            # entailment or novelty response (rigor.run_entailment / run_novelty →
+            # TransBenchLLMError) must not fail the whole asyncio.gather batch and
+            # discard the other hypotheses. Degrade just this hypothesis to the
+            # honest "rigor gate could not complete" record — unsupported,
+            # ungrounded, low confidence — mirroring _build_graded_hypotheses's
+            # missing-rigor fallback. `evidence` keeps whatever entailment state it
+            # reached (provisional "unclear" if entailment itself failed), so the
+            # counts below stay truthful.
+            logger.warning(
+                "rigor_and_novelty: rigor gate failed for hypothesis %r — "
+                "degrading to unsupported/ungrounded (run continues)",
+                hypothesis.id,
+                exc_info=True,
+            )
+            return hypothesis.id, {
+                "evidence": evidence,
+                "supporting_count": sum(1 for e in evidence if e.entailment == "supports"),
+                "contradicting_count": sum(1 for e in evidence if e.entailment == "refutes"),
+                "novelty": "unsupported",
+                "novelty_reason": (
+                    "Rigor gate (agents 5-6, BUILD_SPEC.md §5/§6) could not complete for "
+                    "this hypothesis (malformed model response); classified unsupported "
+                    "and excluded from experiment design."
+                ),
+                "confidence": "low",
+                "grounded": False,
+            }
 
         supporting_count = sum(1 for e in evidence if e.entailment == "supports")
         contradicting_count = sum(1 for e in evidence if e.entailment == "refutes")
@@ -300,8 +353,8 @@ def _build_graded_hypotheses(
                 GradedHypothesis(
                     hypothesis=h,
                     evidence=evidence,
-                    supporting_count=sum(1 for e in evidence if e.supports),
-                    contradicting_count=sum(1 for e in evidence if not e.supports),
+                    supporting_count=sum(1 for e in evidence if e.entailment == "supports"),
+                    contradicting_count=sum(1 for e in evidence if e.entailment == "refutes"),
                     novelty="unsupported",
                     novelty_reason="Rigor gate (agents 5-6, BUILD_SPEC.md §5/§6) did not run for this hypothesis.",
                     confidence="low",
@@ -325,14 +378,14 @@ def _build_graded_hypotheses(
 
 
 async def _design_node(state: TransBenchState) -> TransBenchState:
-    """Agent 7 — Experiment Designer (Sonnet, ``config.MODEL_REASONING``) —
+    """Agent 7 — Experiment Designer (deep-reasoning tier, ``config.MODEL_DEEP``) —
     BUILD_SPEC.md §5. Builds the final ``graded_hypotheses`` list (see
     :func:`_build_graded_hypotheses`) and runs ``rigor.select_experiment_
     candidate`` over it (the novelty guard: only a hypothesis both
-    ``open_question`` and ``grounded`` is eligible). Makes a REAL Sonnet call
+    ``open_question`` and ``grounded`` is eligible). Makes a REAL deep-tier call
     via ``agents.run_design_experiment`` ONLY when a candidate is eligible —
     a run where every hypothesis is ``established`` or ungrounded makes
-    ZERO Sonnet calls in this node at all (nothing eligible to design for);
+    ZERO deep-tier calls in this node at all (nothing eligible to design for);
     ``top_experiment`` is left ``None`` in that case, and
     ``agents.run_assemble`` substitutes the honest "no eligible experiment"
     sentinel instead of a fabricated design.
@@ -359,7 +412,7 @@ async def _design_node(state: TransBenchState) -> TransBenchState:
 
 
 async def _assemble_node(state: TransBenchState) -> TransBenchState:
-    """Agent 8 — Brief Assembler (Haiku, ``config.MODEL_CHEAP``) —
+    """Agent 8 — Brief Assembler (mechanical tier, ``config.MODEL_CHEAP``) —
     BUILD_SPEC.md §5/§8. Builds this call's own temperature-0 client (agents
     1-2's convention) and delegates entirely to ``agents.run_assemble``,
     which reads everything else it needs (axes, ``graded_hypotheses``,
@@ -413,6 +466,7 @@ async def run_transbench_graph(
     *,
     user_provider: str = "anthropic",
     model_reasoning: str = config.MODEL_REASONING,
+    model_deep: str = config.MODEL_DEEP,
     model_cheap: str = config.MODEL_CHEAP,
     max_hypotheses: int = config.MAX_HYPOTHESES,
     retrieval_snapshot: Optional[dict] = None,
@@ -453,6 +507,7 @@ async def run_transbench_graph(
         "user_key": user_key,
         "user_provider": user_provider,
         "model_reasoning": model_reasoning,
+        "model_deep": model_deep,
         "model_cheap": model_cheap,
         "retrieval_snapshot": retrieval_snapshot,
         "run_started_at": run_started_at,

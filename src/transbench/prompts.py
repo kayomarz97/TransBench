@@ -53,7 +53,7 @@ something any agent is asked to author.
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# 1. Decomposer (Haiku) — domain-universalized (see module docstring above for
+# 1. Decomposer (reasoning tier, config.MODEL_REASONING) — domain-universalized (see module docstring above for
 #    why/how this deviates from BUILD_SPEC.md §5's original antihypertensive
 #    -specific verbatim text).
 # ---------------------------------------------------------------------------
@@ -79,7 +79,7 @@ DECOMPOSER_SYSTEM_PROMPT = (
 )
 
 # ---------------------------------------------------------------------------
-# 2. Hypothesis Generator (Sonnet, ≤ MAX_HYPOTHESES) — domain-universalized
+# 2. Hypothesis Generator (deep-reasoning tier, config.MODEL_DEEP; ≤ MAX_HYPOTHESES) — domain-universalized
 #    (see module docstring above; only the population-modifier example list
 #    changed from BUILD_SPEC.md §5's original hypertension-specific verbatim
 #    text — everything else is unchanged).
@@ -126,7 +126,7 @@ SEARCH_QUERY_GENERATOR_SYSTEM_PROMPT = (
 )
 
 # ---------------------------------------------------------------------------
-# 4. Evidence Grader (Haiku) — spec-derived from the §5 procedure (no literal
+# 4. Evidence Grader (mechanical tier, config.MODEL_CHEAP) — spec-derived from the §5 procedure (no literal
 #    quote given there). One BATCHED call per hypothesis over all of its
 #    ranked abstracts (<= ABSTRACT_CAP), never one call per abstract. This is
 #    a *coarse* supports/contradicts + evidence-grade classification only —
@@ -171,7 +171,7 @@ EVIDENCE_GRADER_SYSTEM_PROMPT = (
 )
 
 # ---------------------------------------------------------------------------
-# 6. Rigor Gate — entailment sub-step (Haiku) — spec-derived from BUILD_SPEC.md
+# 6. Rigor Gate — entailment sub-step (mechanical tier, config.MODEL_CHEAP) — spec-derived from BUILD_SPEC.md
 #    §6(1): "A *separate* Haiku call — not folded into the grader, and not
 #    per-item — that classifies ALL of a hypothesis's <=8 evidence items in
 #    ONE structured-JSON call: each item -> supports / refutes / unclear."
@@ -192,7 +192,7 @@ RIGOR_ENTAILMENT_SYSTEM_PROMPT = (
 )
 
 # ---------------------------------------------------------------------------
-# 5. Novelty Checker (Sonnet) — verbatim, BUILD_SPEC.md §5
+# 5. Novelty Checker (reasoning tier, config.MODEL_REASONING) — verbatim, BUILD_SPEC.md §5
 # ---------------------------------------------------------------------------
 NOVELTY_CHECKER_SYSTEM_PROMPT = (
     "Classify the hypothesis given its evidence: 'established' (already "
@@ -202,7 +202,7 @@ NOVELTY_CHECKER_SYSTEM_PROMPT = (
 )
 
 # ---------------------------------------------------------------------------
-# 7. Experiment Designer (Sonnet) — verbatim quoted block, BUILD_SPEC.md §5,
+# 7. Experiment Designer (deep-reasoning tier, config.MODEL_DEEP) — verbatim quoted block, BUILD_SPEC.md §5,
 #    plus its immediately-following (still §5, non-quoted but load-bearing)
 #    "Grounding rule for datasets" sentence, appended verbatim as a second
 #    paragraph since it directly governs this same agent's output.
@@ -225,7 +225,7 @@ EXPERIMENT_DESIGNER_SYSTEM_PROMPT = (
 )
 
 # ---------------------------------------------------------------------------
-# 8. Brief Assembler (Haiku) — spec-derived from BUILD_SPEC.md §5's procedure.
+# 8. Brief Assembler (mechanical tier, config.MODEL_CHEAP) — spec-derived from BUILD_SPEC.md §5's procedure.
 #    references/run_manifest/contradictions_surfaced are assembled in code
 #    (registry.to_reference_list(), etc. — Phase 5); the one piece of actual
 #    LLM prose is uncertainty_note, so that is what this prompt covers.

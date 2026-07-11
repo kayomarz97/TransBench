@@ -264,6 +264,7 @@ async def run_transbench(
     *,
     user_provider: str = "anthropic",
     model_reasoning: str = config.MODEL_REASONING,
+    model_deep: str = config.MODEL_DEEP,
     model_cheap: str = config.MODEL_CHEAP,
     max_hypotheses: int = config.MAX_HYPOTHESES,
     retrieval_snapshot: Optional[dict] = None,
@@ -272,14 +273,15 @@ async def run_transbench(
 
     The complete, shipped 8-agent pipeline (BUILD_SPEC.md §5; every phase
     Opus-verified) runs behind this one entrypoint: decompose (agent 1,
-    Haiku) -> hypothesize (agent 2, Sonnet; up to ``max_hypotheses``
-    falsifiable mechanistic hypotheses) -> per-hypothesis, concurrency
-    -capped retrieve (agent 3, no LLM — PubMed support + contradiction
-    passes) + grade (agent 4, Haiku, one batched call per hypothesis) ->
-    dedicated batched entailment + grounding enforcement + novelty check
-    (agents 5-6, Haiku + Sonnet) -> experiment design (agent 7, Sonnet — only
-    for a hypothesis that clears the novelty guard: ``open_question`` AND
-    ``grounded``) -> brief assembly (agent 8, Haiku). Returns a schema-valid
+    reasoning tier) -> hypothesize (agent 2, deep-reasoning tier; up to
+    ``max_hypotheses`` falsifiable mechanistic hypotheses) -> per-hypothesis,
+    concurrency-capped retrieve (agent 3, no LLM — PubMed support +
+    contradiction passes) + grade (agent 4, mechanical tier, one batched call
+    per hypothesis) -> dedicated batched entailment + grounding enforcement +
+    novelty check (agents 5-6, mechanical + reasoning tiers) -> experiment
+    design (agent 7, deep-reasoning tier — only for a hypothesis that clears
+    the novelty guard: ``open_question`` AND ``grounded``) -> brief assembly
+    (agent 8, mechanical tier). Returns a schema-valid
     ``TransBrief``: ``axes``, up to ``max_hypotheses`` graded hypotheses each
     carrying real, resolvable PubMed/ClinicalTrials.gov citations and an
     auditable novelty verdict, ``top_experiment`` (a runnable computational
@@ -327,6 +329,7 @@ async def run_transbench(
         effective_user_key,
         user_provider=user_provider,
         model_reasoning=model_reasoning,
+        model_deep=model_deep,
         model_cheap=model_cheap,
         max_hypotheses=max_hypotheses,
         retrieval_snapshot=effective_retrieval_snapshot,

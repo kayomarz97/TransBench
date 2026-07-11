@@ -10,8 +10,7 @@
 #   runs under) no matter what's on disk:
 #     • temporarily hides .env behind a restore-trap (never deleted, always put back),
 #     • strips ANTHROPIC_API_KEY / PUBMED_API_KEY from the environment,
-#     • runs in TRANSBENCH_MODE=golden (snapshot replay, no network),
-#     • deselects the tests that BY DESIGN exercise the live-fallback path.
+#     • runs in TRANSBENCH_MODE=golden (snapshot replay, no network).
 #   Result: ~2s, no key, no network, deterministic, green.
 #
 # Usage:  bash scripts/offline-bench.sh [extra pytest args...]
@@ -34,21 +33,16 @@ restore() { [ -e "$BAK" ] && mv -f "$BAK" "$ROOT/.env"; }
 trap restore EXIT INT TERM
 [ -f "$ROOT/.env" ] && mv "$ROOT/.env" "$BAK"
 
-# Tests that make a REAL API call BY DESIGN — they assert the live-FALLBACK path taken when a
-# snapshot deliberately doesn't match. Unlike every other live test, they lack the
-# `skipif(not ANTHROPIC_API_KEY)` guard their siblings have, so they cannot pass offline.
-# LONG-TERM FIX: add that guard to these two upstream; until then they're out of OFFLINE scope
-# (run them in the live suite, with a key). See the mistakes ledger in .claude/AGENTS_PLAYBOOK.md.
-DESELECT=(
-  "tests/test_experiment_phase5.py::test_run_retrieve_falls_through_to_live_when_snapshot_has_no_matching_entry"
-  "tests/test_snapshot_toggle.py::test_statement_mismatch_falls_back_to_live_retrieval"
-)
-desel_args=()
-for n in "${DESELECT[@]}"; do desel_args+=(--deselect "$n"); done
+# NOTE (CODE_REVIEW Finding 6): the two live-fallback tests (run_retrieve's snapshot-miss and
+# statement-mismatch cases) were previously --deselect'd here — one of them left
+# `gather_extra_sources` un-mocked, so it hit live Europe PMC and was non-deterministic offline.
+# Both now mock that backend like their siblings, so they are genuinely offline + deterministic
+# and run in this bench with NO manual exclusions. Keep it that way: never re-add a --deselect to
+# hide a failure — fix the test's un-mocked seam instead.
 
-echo "🧪 offline bench — no key, golden replay, ${#DESELECT[@]} live-fallback test(s) deselected"
+echo "🧪 offline bench — no key, golden replay, no manual exclusions"
 env -u ANTHROPIC_API_KEY -u PUBMED_API_KEY TRANSBENCH_MODE=golden \
-  "$ROOT/.venv/bin/python" -m pytest -q -p no:cacheprovider "${desel_args[@]}" "$@"
+  "$ROOT/.venv/bin/python" -m pytest -q -p no:cacheprovider "$@"
 rc=$?
 
 echo

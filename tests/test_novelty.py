@@ -100,8 +100,8 @@ def test_established_aceinhibitor_cough_is_graded_established_and_not_selected()
         f"expected the textbook ACEi-cough mechanism to be graded 'established', "
         f"got {graded.novelty!r} (reason: {graded.novelty_reason!r})"
     )
-    # BUILD_SPEC.md §6(3): novelty_reason must cite a specific PMID (enforced
-    # structurally by rigor._ensure_pmid_citation, not merely requested).
+    # BUILD_SPEC.md §6(3): novelty_reason must cite a specific evidence id (enforced
+    # structurally by rigor._ensure_evidence_citation, not merely requested).
     real_pmids = [e.reference.pmid for e in graded.evidence if e.reference.pmid]
     if real_pmids:
         assert any(pmid in graded.novelty_reason for pmid in real_pmids), (

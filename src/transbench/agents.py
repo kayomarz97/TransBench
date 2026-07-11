@@ -557,7 +557,7 @@ def current_token_spend() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Agent 1 — Decomposer (Haiku, config.MODEL_CHEAP)
+# Agent 1 — Decomposer (reasoning tier, config.MODEL_REASONING)
 # ---------------------------------------------------------------------------
 
 
@@ -634,7 +634,7 @@ async def run_decompose(payload: dict, llm) -> DecomposeResult:
 
 
 # ---------------------------------------------------------------------------
-# Agent 2 — Hypothesis Generator (Sonnet, config.MODEL_REASONING)
+# Agent 2 — Hypothesis Generator (deep-reasoning tier, config.MODEL_DEEP)
 # ---------------------------------------------------------------------------
 
 
@@ -1500,7 +1500,7 @@ async def run_retrieve(
 
 
 # ---------------------------------------------------------------------------
-# Agent 4 — Evidence Grader (Haiku, config.MODEL_CHEAP, BATCHED per hypothesis)
+# Agent 4 — Evidence Grader (mechanical tier, config.MODEL_CHEAP, BATCHED per hypothesis)
 # ---------------------------------------------------------------------------
 
 
@@ -1749,7 +1749,7 @@ async def run_grade(
 
 
 # ---------------------------------------------------------------------------
-# Agent 7 — Experiment Designer (Sonnet, config.MODEL_REASONING)
+# Agent 7 — Experiment Designer (deep-reasoning tier, config.MODEL_DEEP)
 # ---------------------------------------------------------------------------
 
 # BUILD_SPEC.md §5's "Grounding rule for datasets" names the recognized hosts
@@ -2339,7 +2339,7 @@ async def run_design_experiment(candidate: Hypothesis, evidence: list[EvidenceIt
 
 
 # ---------------------------------------------------------------------------
-# Agent 8 — Brief Assembler (Haiku, config.MODEL_CHEAP)
+# Agent 8 — Brief Assembler (mechanical tier, config.MODEL_CHEAP)
 # ---------------------------------------------------------------------------
 
 # BUILD_SPEC.md §4's TransBrief.top_experiment is a REQUIRED ExperimentPlan

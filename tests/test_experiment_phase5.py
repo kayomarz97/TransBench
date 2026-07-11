@@ -1050,8 +1050,12 @@ def test_run_retrieve_falls_through_to_live_when_snapshot_has_no_matching_entry(
             fetch_success=True,
         )
 
+    async def _no_extra_sources(query: str, retmax: int = 15) -> list:
+        return []  # keep this test offline + deterministic; extra backends (Europe PMC) tested separately
+
     monkeypatch.setattr(agents, "neutralize_query", _fake_neutralize)
     monkeypatch.setattr(agents, "fetch_evidence_data", _fake_fetch)
+    monkeypatch.setattr(agents, "gather_extra_sources", _no_extra_sources)
 
     result = asyncio.run(
         run_retrieve(
