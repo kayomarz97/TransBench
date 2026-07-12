@@ -37,26 +37,9 @@ handles whatever you paste in.
 
 ---
 
-## ⚡ Try it yourself — no API key, two commands
-
-Golden mode replays a real, committed run **byte-for-byte** — nothing to configure, no key, instant:
-
-```bash
-git clone https://github.com/kayomarz97/TransBench.git && cd TransBench && uv sync
-TRANSBENCH_MODE=golden PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "
-import asyncio
-from transbench.engine import run_transbench
-brief = asyncio.run(run_transbench(
-    '49M, type 2 diabetes with persistent postprandial hyperglycemia despite metformin at '
-    'maximal dose and confirmed adherence; elevated fasting glucagon; blunted GLP-1 response '
-    'to mixed-meal testing.'))
-print(brief.top_experiment.claude_science_prompt)
-"
-```
-
 ## 🚀 Install it in one paste — for scientists, no engineering
 
-Want to run it on your **own** cases (not just the demo above)? You don't need to be a programmer, and
+Want to run it on your **own** cases (not just the demo)? You don't need to be a programmer, and
 there are **no servers, domains, or cloud accounts** to set up. If you have
 **[Claude Code](https://code.claude.com/docs)**, this is the whole install:
 
@@ -96,6 +79,20 @@ Then you get **two ways to use it** — the installer sets up the first and offe
 
 ---
 
+## 🔬 Built with Claude — deeply, not superficially
+
+- **Claude Code** built the whole system — the 8-agent LangGraph engine, the MCP server, and the
+  three rigor gates.
+- **Claude Science** is the destination: TransBench ships as an MCP **connector** and emits a
+  paste-ready `claude_science_prompt` that Claude Science turns into a reproducible figure.
+- **Three Claude tiers** run the pipeline — **Opus 4.8** (hypothesize + experiment design, the two
+  quality levers), **Sonnet** (decompose + novelty), **Haiku** (grade / entail / assemble).
+- **Dataset-agnostic:** it names *and content-verifies* public datasets (GEO, Tabula Sapiens) — and
+  is built to target this hackathon's **Gladstone-provided** data (T-cell sequencing,
+  regulatory-activity prediction, protein-interaction networks).
+
+---
+
 ## 🎥 Demo (3-minute video)
 
 **▶ Watch the walkthrough:** _add-your-link-here_ — a real de-identified case → a grounded brief with
@@ -111,17 +108,22 @@ so golden mode replays precisely what the video shows.
 
 ---
 
-## 🔬 Built with Claude — deeply, not superficially
+## ⚡ Try it yourself — no API key, two commands
 
-- **Claude Code** built the whole system — the 8-agent LangGraph engine, the MCP server, and the
-  three rigor gates.
-- **Claude Science** is the destination: TransBench ships as an MCP **connector** and emits a
-  paste-ready `claude_science_prompt` that Claude Science turns into a reproducible figure.
-- **Three Claude tiers** run the pipeline — **Opus 4.8** (hypothesize + experiment design, the two
-  quality levers), **Sonnet** (decompose + novelty), **Haiku** (grade / entail / assemble).
-- **Dataset-agnostic:** it names *and content-verifies* public datasets (GEO, Tabula Sapiens) — and
-  is built to target this hackathon's **Gladstone-provided** data (T-cell sequencing,
-  regulatory-activity prediction, protein-interaction networks).
+Golden mode replays a real, committed run **byte-for-byte** — nothing to configure, no key, instant:
+
+```bash
+git clone https://github.com/kayomarz97/TransBench.git && cd TransBench && uv sync
+TRANSBENCH_MODE=golden PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "
+import asyncio
+from transbench.engine import run_transbench
+brief = asyncio.run(run_transbench(
+    '49M, type 2 diabetes with persistent postprandial hyperglycemia despite metformin at '
+    'maximal dose and confirmed adherence; elevated fasting glucagon; blunted GLP-1 response '
+    'to mixed-meal testing.'))
+print(brief.top_experiment.claude_science_prompt)
+"
+```
 
 ---
 
