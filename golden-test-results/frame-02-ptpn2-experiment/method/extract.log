@@ -1,0 +1,7 @@
+[20:00:12] downloading matrix (resumable)...
+[20:02:36] download done: 3857480145 bytes
+[20:02:36] streaming through mawk...
+[20:08:37] extraction done. GEX nnz=90771567
+[20:09:41] wrote matrix.mtx.gz (283180628 bytes)
+[20:09:41] hto_body lines: 87770
+[20:09:41] ALL DONE

@@ -15,6 +15,11 @@ prompt into a Claude Science chat to produce the figure.
 
 Verified against installed build **claude-science 0.1.17-dev** (2026-07-09).
 
+> **Not an engineer? Don't do these steps by hand.** The easiest install is the
+> **[one-paste installer](INSTALL_AGENT.md)** — paste a single prompt into Claude Code (on Haiku) and it
+> performs everything in this document for you, on macOS or Linux, and ends with the exact Claude Science
+> connect steps. This file is the manual/reference version of the same thing.
+
 ## Why there is no fully-local *connector* (both Claude Science options are blocked)
 Claude Science's "Add connector" offers **Remote** and **Local command** — and for a tool that
 itself calls an LLM, both are dead ends locally:
@@ -143,4 +148,5 @@ bash mcp_server/ask.sh "<de-identified observation>"   # local: brief + paste-re
 APP=/root/Downloads/claude-science-linux-x64
 $APP url            # fresh CS login link       $APP status   # running? port/pid/version
 $APP logs --tail    # watch the daemon log      $APP stop     # shut CS down
-```
+``
+

@@ -43,6 +43,13 @@ handles whatever you paste in.
 live PubMed citations → the experiment run inside Claude Science → and the **honest refusal** when the
 evidence is too thin to ship.
 
+**📁 Don't take the video's word for it — verify the results:** the exact run behind this walkthrough
+lives in [`golden-test-results/`](golden-test-results/) — TransBench's golden brief **and** the
+PTPN2 / type-I-IFN experiment Claude Science actually executed from it (dataset GEO GSE278572), with the
+composite figure, the FDR-corrected statistics table, all 41 references, and a `MANIFEST.md` of sha256
+checksums for every file. The brief there is **byte-identical** to `snapshots/autoimmune_sle_treg_golden_brief.json`,
+so golden mode replays precisely what the video shows.
+
 ## ⚡ Try it yourself — no API key, two commands
 
 Golden mode replays a real, committed run **byte-for-byte** — nothing to configure, no key, instant:
@@ -59,6 +66,48 @@ brief = asyncio.run(run_transbench(
 print(brief.top_experiment.claude_science_prompt)
 "
 ```
+
+## 🚀 Install it in one paste — for scientists, no engineering
+
+Want to run it on your **own** cases (not just the demo above)? You don't need to be a programmer, and
+there are **no servers, domains, or cloud accounts** to set up. If you have
+**[Claude Code](https://code.claude.com/docs)**, this is the whole install:
+
+**1. Start Claude Code with Haiku** (fast and inexpensive — it's all this needs):
+```bash
+claude --model haiku
+```
+**2. Paste this prompt and press Enter:**
+```
+Read https://raw.githubusercontent.com/kayomarz97/TransBench/main/INSTALL_AGENT.md
+and follow every step exactly to set up TransBench on my computer, then give me the
+short steps to connect it in Claude Science. I am not a programmer — explain each step
+in one plain sentence, ask me before anything that needs my input, and never print my
+API key.
+```
+
+That's the whole thing. Claude Code reads one public file — [`INSTALL_AGENT.md`](INSTALL_AGENT.md) — and
+does the rest, **the same on macOS and Linux** (it detects your system). It will install the tools it
+needs (`git`, `uv`, Python), download TransBench, ask you to put your **own** Anthropic API key in a
+private local file (it never sees or prints it), run a free offline self-test to prove the install works,
+and finish with a short **"connect it in Claude Science"** card.
+
+Then you get **two ways to use it** — the installer sets up the first and offers the second:
+- **Private & local (default):** one command prints a ready-to-paste prompt you drop into a Claude
+  Science chat. Nothing is exposed online.
+- **As a real connector (optional):** one command opens a temporary secure web address so Claude
+  Science's agent can call TransBench directly — **no domain, no Cloudflare account.** It offers
+  `cloudflared` (no signup) *or* `ngrok` (stays the same address) and lets you choose.
+
+> **Why Haiku, and why no "effort" setting?** `INSTALL_AGENT.md` is a plain, ordered checklist, so a
+> small, cheap model runs it reliably — no bigger model and no "thinking effort" dial needed (Haiku
+> doesn't use one). The reproducibility comes from the file, not from the model.
+
+> ⚕️ You'll need your own Anthropic API key (from [console.anthropic.com](https://console.anthropic.com)),
+> and — because the reasoning uses Anthropic's cloud API + PubMed — **de-identify** every observation
+> first (age band + presentation only; no names, MRNs, or dates).
+
+---
 
 ## 🔬 Built with Claude — deeply, not superficially
 

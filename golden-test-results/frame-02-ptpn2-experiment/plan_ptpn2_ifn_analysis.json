@@ -1,0 +1,90 @@
+{
+  "version": 3,
+  "created_at": "2026-07-12T14:31:12.190Z",
+  "task_summary": "PTPN2 expression & IFN-response analysis in NTC CD4+ Tregs vs Teffs (GSE278572)",
+  "agents": [],
+  "phases": [
+    {
+      "name": "Data assembly & QC",
+      "delegations": [
+        {
+          "name": "Load & subset",
+          "steps": [
+            {
+              "title": "Build NTC 10x matrix",
+              "description": "Stream the remote matrix, keep only the 21,943 single-guide non-targeting-control (NTC) cells, and write a compact 10x trio (barcodes/features/matrix) plus the HTO condition table. (Running in background.)"
+            },
+            {
+              "title": "Load, normalize, log1p",
+              "description": "sc.read_10x_mtx the NTC trio; basic QC (min genes/cells); sc.pp.normalize_total(target_sum=1e4) then sc.pp.log1p. Keep raw counts in a layer."
+            },
+            {
+              "title": "Define CD4+ Treg / Teff",
+              "description": "Restrict to CD4+ T cells (CD3E>0, CD4>0, CD8A==0). Treg = FOXP3>0 & IL2RA>0; Teff = FOXP3==0 & IL2RA==0. Cross-tabulate against HTO condition label as a sanity check; report counts per group and per lane."
+            }
+          ]
+        }
+      ],
+      "id": "phase-0"
+    },
+    {
+      "name": "Core statistics",
+      "delegations": [
+        {
+          "name": "Stats",
+          "steps": [
+            {
+              "title": "PTPN2 Treg vs Teff",
+              "description": "Wilcoxon rank-sum on PTPN2 log-normalized expression (Treg vs Teff); report p, log2 fold-change, rank-biserial effect size, and bootstrap 95% CI of the difference."
+            },
+            {
+              "title": "Type I IFN score & correlation",
+              "description": "sc.tl.score_genes for [IFIT1, IFIT3, MX1, OAS1, ISG15, IFI44L]. Within Tregs, Spearman-correlate per-cell PTPN2 vs IFN score; repeat in Teff as negative control. Report rho, p, 95% CI."
+            },
+            {
+              "title": "STAT5/JAK co-expression matrix",
+              "description": "Within Tregs, pairwise Spearman among PTPN2, STAT5A, STAT5B, JAK1, JAK3, FOXP3; build correlation matrix for the heatmap."
+            },
+            {
+              "title": "Lane-level pseudobulk paired test",
+              "description": "Pseudo-bulk mean PTPN2 per lane per cell type (Treg/Teff); paired Wilcoxon signed-rank across the 8 lanes; report p and per-lane values. Labeled lane-level (donor not recoverable)."
+            }
+          ]
+        }
+      ],
+      "id": "phase-1"
+    },
+    {
+      "name": "Figure & reporting",
+      "delegations": [
+        {
+          "name": "Compose",
+          "steps": [
+            {
+              "title": "Compute UMAP",
+              "description": "HVG → scale → PCA → neighbors → UMAP on the CD4+ subset; store cell-type labels for coloring."
+            },
+            {
+              "title": "Composite figure",
+              "description": "Assemble 4-panel figure with figure-style: (A) UMAP by cell type, (B) PTPN2 violin Treg vs Teff, (C) IFN score vs PTPN2 scatter in Tregs, (D) STAT5 co-expression heatmap. Annotate effect sizes and FDR-corrected p-values."
+            },
+            {
+              "title": "Stats table & FDR",
+              "description": "Assemble all test results into one table with Benjamini-Hochberg FDR across the family of tests, effect sizes, and 95% CIs; save figure, table, and annotated AnnData checkpoint as artifacts."
+            }
+          ]
+        }
+      ],
+      "id": "phase-2"
+    }
+  ],
+  "desired_outputs": [
+    "Multi-panel composite figure (UMAP by cell type, PTPN2 violin Treg vs Teff, IFN-score vs PTPN2 scatter, STAT5 co-expression heatmap)",
+    "Statistics table: Wilcoxon PTPN2 Treg vs Teff (p, FDR, log2FC, effect size, 95% CI); Spearman PTPN2~IFN in Treg & Teff; pairwise Spearman matrix; lane-level paired signed-rank",
+    "Compact NTC 10x matrix + annotated AnnData checkpoint"
+  ],
+  "feasibility": {
+    "confidence": "medium",
+    "rationale": "All required genes and the NTC cells are present and the pipeline is standard scanpy. Two caveats: (1) the full 3.86 GB matrix exceeds available RAM, so I stream-filter to the 21,943 NTC cells before loading (faithful to sc.read_10x_mtx on the subset); (2) true donor identity is not recoverable from the deposited files (HTOs encode condition, not donor; no genotypes), so step 7's pseudo-bulk uses the 8 lanes as the replicate unit — clearly labeled as lane-level, not genetically-resolved donor-level."
+  }
+}

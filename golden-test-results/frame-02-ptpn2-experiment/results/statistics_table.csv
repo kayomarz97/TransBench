@@ -1,0 +1,20 @@
+test,method,group,n,statistic,effect,ci95,p,FDR_BH
+PTPN2 Treg vs Teff (per-cell),Wilcoxon rank-sum,Treg vs Teff,5972 vs 1886,U=6233022,log2FC=+0.171; rank-biserial=+0.107; AUC=0.553,"log2FC[0.070, 0.280]",1.031e-12,9.796e-12
+PTPN2 Treg vs Teff (lane pseudobulk),Wilcoxon signed-rank (paired),8 lanes,8,W=2,mean paired diff=+0.043 (log-norm),—,2.344e-02,3.711e-02
+PTPN2 ~ IFN score (Treg),Spearman,Treg,5972,rho=-0.035,rho=-0.035,"[-0.061, -0.008]",7.300e-03,1.261e-02
+"PTPN2 ~ IFN score (Teff, neg ctrl)",Spearman,Teff,1886,rho=-0.017,rho=-0.017,"[-0.061, +0.031]",4.519e-01,5.367e-01
+Co-expr PTPN2~STAT5A (Treg),Spearman,Treg,5972,rho=+0.022,rho=+0.022,—,8.568e-02,1.247e-01
+Co-expr PTPN2~STAT5B (Treg),Spearman,Treg,5972,rho=+0.022,rho=+0.022,—,9.190e-02,1.247e-01
+Co-expr PTPN2~JAK1 (Treg),Spearman,Treg,5972,rho=-0.069,rho=-0.069,—,8.560e-08,2.978e-07
+Co-expr PTPN2~JAK3 (Treg),Spearman,Treg,5972,rho=+0.005,rho=+0.005,—,7.104e-01,7.104e-01
+Co-expr PTPN2~FOXP3 (Treg),Spearman,Treg,5972,rho=-0.069,rho=-0.069,—,1.097e-07,2.978e-07
+Co-expr STAT5A~STAT5B (Treg),Spearman,Treg,5972,rho=+0.088,rho=+0.088,—,8.526e-12,5.400e-11
+Co-expr STAT5A~JAK1 (Treg),Spearman,Treg,5972,rho=+0.049,rho=+0.049,—,1.427e-04,2.712e-04
+Co-expr STAT5A~JAK3 (Treg),Spearman,Treg,5972,rho=+0.012,rho=+0.012,—,3.368e-01,4.266e-01
+Co-expr STAT5A~FOXP3 (Treg),Spearman,Treg,5972,rho=+0.069,rho=+0.069,—,1.093e-07,2.978e-07
+Co-expr STAT5B~JAK1 (Treg),Spearman,Treg,5972,rho=+0.082,rho=+0.082,—,2.049e-10,9.733e-10
+Co-expr STAT5B~JAK3 (Treg),Spearman,Treg,5972,rho=+0.055,rho=+0.055,—,1.806e-05,4.289e-05
+Co-expr STAT5B~FOXP3 (Treg),Spearman,Treg,5972,rho=-0.006,rho=-0.006,—,6.547e-01,7.050e-01
+Co-expr JAK1~JAK3 (Treg),Spearman,Treg,5972,rho=+0.053,rho=+0.053,—,3.847e-05,8.121e-05
+Co-expr JAK1~FOXP3 (Treg),Spearman,Treg,5972,rho=+0.237,rho=+0.237,—,3.559e-77,6.762e-76
+Co-expr JAK3~FOXP3 (Treg),Spearman,Treg,5972,rho=-0.006,rho=-0.006,—,6.679e-01,7.050e-01

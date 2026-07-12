@@ -1,0 +1,701 @@
+================================================================================
+REFERENCES (41)
+================================================================================
+ref keys: ['source', 'title', 'year', 'url', 'pmid', 'grade']
+
+References with PMIDs: 38 / 41
+
+[uncertainty_note]
+All three hypotheses remain mechanistically plausible but unvalidated as unified causal chains in this patient's SLE context. H1 and H3 lack direct supporting evidence for their proposed sequences (IFN→DNMT3A→TSDR hypermethylation→Treg conversion, and CXCR3-driven sequestration→local IL-17 reprogramming, respectively), while H2—though grounded in real biology—has not been demonstrated specifically for PTPN2-mediated STAT5 dephosphorylation within Tregs as a mechanism of MMF/HCQ refractoriness. Critically, no evidence directly addresses why standard immunosuppression fails in this patient, and the relative contribution of each proposed mechanism (epigenetic instability, STAT5 signaling defects, or tissue sequestration) remains unknown. Readers should treat these as testable hypotheses rather than established explanations and recognize that the peripheral Treg deficit may reflect multiple simultaneous mechanisms not fully captured by any single model. Translational note: some supporting evidence may derive from the same mechanism established in other diseases, tissues, or model systems rather than this exact clinical context. That is expected and intended — a mechanism shown elsewhere is a testable hypothesis, not an established fact, for this patient; the proposed experiment is designed precisely to test whether it operates here.
+
+[contradictions_surfaced]
+[]
+
+[run_manifest]
+{
+  "reuse_source": "installed_iatronix",
+  "model_reasoning": "claude-sonnet-4-6",
+  "model_deep": "claude-sonnet-4-6",
+  "model_cheap": "claude-haiku-4-5-20251001",
+  "temperature": 0,
+  "max_hypotheses": 3,
+  "abstract_cap": 8,
+  "concurrency": 3,
+  "focus_drug": null,
+  "condition_anchor": "systemic lupus erythematosus",
+  "retrieval_snapshot_provided": false,
+  "retrieval_snapshot": {
+    "H1": {
+      "neutral_query": "In this patient, hypermethylation of the FOXP3 Treg-specific demethylated region (TSDR) in CD4+ T cells \u2014 driven by aberrant DNMT3A upregulation downstream of chronic type I IFN signaling \u2014 destabilizes the Treg lineage commitment program, causing existing Tregs to lose FOXP3 expression and convert toward a pathogenic IL-17-secreting phenotype, thereby reducing measured peripheral Treg frequency independently of impaired de novo Treg generation.",
+      "pubmed_query": "FOXP3 TSDR methylation Treg stability",
+      "tier_queries": [
+        "FOXP3 TSDR methylation Treg stability"
+      ],
+      "abstracts": [
+        {
+          "pmid": "41314617",
+          "doi": "10.1016/j.ajt.2025.11.011",
+          "pmcid": "PMC12971219",
+          "nct_id": null,
+          "title": "Pharmacokinetics, lineage identity, and trafficking of ex vivo expanded polyclonal regulatory T cells in a prospective randomized clinical trial of kidney transplant recipients with allograft inflammation.",
+          "abstract": "Regulatory T cells (Tregs) can reverse inflammation in animal models. We conducted a randomized controlled clinical trial of Treg therapy in kidney transplant recipients with subclinical graft inflammation (NCT02711826). The primary endpoint was the change in graft inflammation on a follow-up biopsy 6 months after Treg infusion. The trial accrued 8 control group participants and 7 polyclonal Treg group participants; the latter received 400 \u00d7 106 to 1 \u00d7 109 polyclonally expanded Tregs without adverse events. Graft inflammation decreased substantially in both groups at 6 months; however, the degree of change was not significantly different between the groups. The peak of infused Tregs in circulation correlated positively with the pre-existing circulating CD4+ T cell numbers, suggesting that Treg engraftment was limited by the size of the endogenous CD4+ T cell compartment. Infused Tregs were detected in 14-day postinfusion biopsies, albeit at lower frequencies than in circulation. Unlike prior experiences, some infused Tregs emerged among non-Treg CD4+ T cells in 4 participants; these patients had higher concentrations of serum cytokines, indicative of more systemic inflammation. The study failed to show the efficacy of polyclonal Tregs due to self-resolving graft inflammation but identified the importance of monitoring Treg product identity and their stability and trafficking after infusion.",
+          "year": "2026",
+          "journal": "American journal of transplantation : official journal of the American Society of Transplantation and the American Society of Transplant Surgeons",
+          "source": "Europe PMC",
+          "pub_types": [
+            "research-article",
+            "Randomized Controlled Trial",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 16.0,
+          "_rank_breakdown": {
+            "study_type": 7.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "42183190",
+          "doi": "10.3389/fimmu.2026.1772001",
+          "pmcid": "PMC13189970",
+          "nct_id": null,
+          "title": "Regulatory T cell therapy in autoimmune and immune-mediated diseases: from basic research to clinical practice and future perspectives.",
+          "abstract": "Regulatory T cells (Tregs) are pivotal immune modulators essential for maintaining immune homeostasis and preventing aberrant immune responses. In recent years, Treg-based therapies have emerged as a promising strategy for treating a variety of non-malignant diseases, including autoimmune disorders, transplantation-related complications, and allergic conditions. This review provides a comprehensive overview of the discovery and evolution of Tregs, detailing their immunoregulatory mechanisms that underpin their therapeutic potential. We systematically evaluate current clinical applications of Treg therapy in diverse non-tumor pathologies, highlighting both the efficacy and safety outcomes reported in ongoing clinical trials. Additionally, the review addresses the challenges faced in translating Treg therapies from bench to bedside, such as cell stability, expansion methodologies, and functional heterogeneity. Finally, we explore future directions in Treg research, including innovative therapeutic approaches, advances in gene engineering technologies, and improvements in cell expansion techniques, all aimed at enhancing the clinical translation and therapeutic efficacy of Treg-based interventions. This article aims to provide a thorough theoretical foundation and practical guidance to advance the application of Treg therapy in non-malignant diseases.",
+          "year": "2026",
+          "journal": "Frontiers in immunology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41677595",
+          "doi": "10.3390/cells15030228",
+          "pmcid": "PMC12896536",
+          "nct_id": null,
+          "title": "Unraveling the Epigenetic Regulation of Regulatory T Cells in Cancer Immunity.",
+          "abstract": "Regulatory T cells (Tregs) are central mediators of immune tolerance, yet within tumors they adopt specialized phenotypes that confer the potent suppression of anti-tumor immune responses. Emerging evidence indicates that this functional plasticity is not driven by genetic alterations but instead arises from dynamic and context-dependent epigenetic reprogramming. While individual epigenetic mechanisms controlling Treg development and stability have been described, how tumor-derived cues reshape Treg epigenetic states, how these programs differ across cancer types, and which features distinguish tumor-infiltrating Tregs from their peripheral counterparts remain incompletely understood. In this review, we synthesize recent advances in DNA methylation, histone modifications, chromatin accessibility, and non-coding RNA regulation that govern Treg identity and function with a particular emphasis on tumor-specific epigenetic adaptations. We highlight emerging epigenetic hallmarks of intratumoral Tregs, discuss unresolved mechanistic questions, and evaluate the therapeutic potential and limitations of targeting epigenetic pathways to selectively modulate Tregs in cancer. By integrating mechanistic, cancer-specific, and translational perspectives, this review aims to provide a conceptual framework for understanding how epigenetic regulation shapes Treg behavior in the tumor microenvironment and how it may be exploited for cancer immunotherapy.",
+          "year": "2026",
+          "journal": "Cells",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "42196608",
+          "doi": "10.3390/ijms27104630",
+          "pmcid": "PMC13207616",
+          "nct_id": null,
+          "title": "Regulatory T Cells in Hepatocellular Carcinoma: Spatial Niches, Biomarkers, and Clinical Implications.",
+          "abstract": "Hepatocellular carcinoma (HCC) is a leading cause of cancer mortality worldwide, increasingly driven by metabolic dysfunction-associated steatotic liver disease alongside viral and alcohol-related cirrhosis. The tolerogenic immune environment of the liver enables tumor immune escape, with regulatory T cells (Tregs) playing a central role. This review synthesizes human-focused evidence (tissues, blood, clinical cohorts, and single-cell/spatial studies) through September 2025 to define how Tregs are recruited, maintained, and functionally deployed in HCC. Across datasets, intratumoral effector-like Tregs (eTregs) expressing ICOS, CTLA-4, CCR8, and CD39/CD73 accumulate within tumors and co-localize with exhausted cytotoxic PD-1hi CD8+ T cells and suppressive myeloid cells. Recruitment is driven mainly by CCL20-CCR6 and CCL22/CCL17-CCR4 signaling, while CCR8 marks highly suppressive tumor-resident Tregs. Their persistence is supported by TGF-\u03b2, IL-10, IL-35, adenosine signaling, IL-2 sequestration, and metabolic adaptation. Spatial biomarkers, including ICOS+/CCR8+ eTreg density and CD8:Treg ratios, associate with prognosis and emerging immunotherapy responses. Etiology further shapes immune architecture: HBV-related HCC often forms Treg-exhausted T-cell niches around viral antigens, whereas MASLD/MASH promotes stromal and metabolic barriers that may reduce PD-(L)1 efficacy. Current treatments (PD-(L)1 blockade with anti-VEGF or CTLA-4, and some TKIs) intersect with Treg biology, while emerging strategies targeting CCR8, CCR4, ICOS, or the adenosine pathway aim to selectively disrupt intratumoral eTreg networks. This review underscores that an etiology-aware, spatial-biomarker framework may guide the integration of selective Treg targeting with PD-(L)1-based therapies in HCC.",
+          "year": "2026",
+          "journal": "International journal of molecular sciences",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41987918",
+          "doi": "10.3389/fcvm.2026.1777360",
+          "pmcid": "PMC13076496",
+          "nct_id": null,
+          "title": "A stage-based framework to interpret regulatory T cell biology after heart transplantation.",
+          "abstract": "Regulatory T cells play a pivotal role in immune responses following heart transplantation, influencing the entire post-transplant process. This article examines Treg dynamics in a stage-specific framework and their clinical implications. In the early phase (0-30 days), dominated by injury-related sterile inflammation, Treg recruitment affects local inflammation resolution and tissue repair, potentially altering risks of early immune injury and rejection. The intermediate phase (1-6 months) features high acute cellular rejection risk with ongoing immunosuppression adjustments; Treg quantity, phenotype, and suppressive function are closely associated with the regulation of anti-donor immune responses. In the late phase (>6 months), chronic low-grade inflammation and progressive vascular remodeling predominate, where Tregs suppress persistent immune attacks but may promote fibrosis via repair pathways, exhibiting bidirectional effects. This article highlights Treg detection limitations, including FOXP3 specificity, epigenetic stability, and blood-graft discrepancies. Future directions encompass multimarker monitoring, dynamic risk models, Treg cell therapy, and interventions like cytokine/microbiome modulation to achieve precise immunoregulation, reduce rejection, minimize complications, and improve long-term graft survival.",
+          "year": "2026",
+          "journal": "Frontiers in cardiovascular medicine",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41970643",
+          "doi": "10.3389/fgene.2026.1787421",
+          "pmcid": "PMC13065300",
+          "nct_id": null,
+          "title": "Tumor microenvironment-induced epigenetic reprogramming of Tregs and its impact on immunotherapy.",
+          "abstract": "The tumor microenvironment (TME) represents a complex system comprising various cells and extracellular matrix components that play a crucial role in tumor initiation and progression. While recent therapeutic strategies for predominantly focus on targeting tumor cells, their impact on other cellular components in the TME, such as regulatory T (Treg) cells, remains insufficiently understood. The cellular components of the TME include tumor cells, immune cells, tumor-associated stromal cells, and myeloid-derived suppressor cells. Notably, the role of Treg cells in tumor therapy has emerged as a significant research area of focus in recent years. Regulatory CD4+ T cells, characterized by the expression of the transcription factor Forkhead Box P3 (FOXP3) and the surface marker CD25, are pivotal in mediating immune suppression and maintaining immune tolerance and homeostasis. Current tumor treatments mainly rely on radiation and chemotherapy. Although innovative therapies such as immune checkpoint inhibitors (ICIs) and chimeric antigen receptor T-cell (CAR-T) therapies have demonstrated promising outcomes, their efficacy is limited, benefiting only a small subset of patients. Epigenetic inhibitors are increasingly recognized as pivotal in cancer treatment; however, prior research has predominantly concentrated on their effects on the tumor itself, while overlooking the potential influence of these compounds on regulatory T cells (Tregs) within the tumor microenvironment (TME). The therapeutic viability of modulating Tregs within the TME remains uncertain. The intricate microenvironment of the TME significantly influences the distinct epigenetic landscape of tumor-infiltrating Treg cells, including modifications in DNA methylation, histone modifications, and chromatin remodeling. A comprehensive understanding of these epigenetic modifications and the underlying factors driving them could unveil novel strategies for cancer therapy. This approach would enhance the understanding of the critical role of Tregs in tumor therapy and facilitate the development of more effective targeted therapies by addressing the unique epigenetic characteristics of tumor-infiltrating Tregs.",
+          "year": "2026",
+          "journal": "Frontiers in genetics",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41639687",
+          "doi": "10.1186/s12974-025-03677-z",
+          "pmcid": "PMC12870331",
+          "nct_id": null,
+          "title": "From pathogenesis to therapy: the emerging role of regulatory T cells in amyotrophic lateral sclerosis.",
+          "abstract": "Amyotrophic lateral sclerosis (ALS) is a fatal neurodegenerative disease characterized by progressive loss of motor neurons in the brain and spinal cord, with a pathogenesis that remains incompletely understood. Increasing evidence in recent years has highlighted the pivotal role of neuroinflammation in ALS, in which regulatory T cells (Tregs) emerge as key modulators of the neuroimmune response. This review systematically summarizes recent advances in understanding Treg biology in ALS, including their dynamic alterations across different disease stages and their potential immunoregulatory mechanisms, while also highlighting ongoing clinical trials and emerging cellular therapeutic strategies targeting Tregs. Current evidence suggests that Tregs not only participate in the immunopathology of ALS but also represent a promising target for therapeutic intervention. Nevertheless, there are still significant challenges, including incomplete mechanistic insights, limited clinical validation and obstacles to the implementation of Treg-based therapies. Overall, Treg research in ALS provides valuable directions for elucidating disease mechanisms and developing novel immune-based interventions.",
+          "year": "2026",
+          "journal": "Journal of neuroinflammation",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41294856",
+          "doi": "10.3390/cells14221803",
+          "pmcid": "PMC12650914",
+          "nct_id": null,
+          "title": "Improvement of Treg Selectivity and Stability for Diabetes Mellitus Type 1 Treatment: Complex Approach for Perspective Technologies.",
+          "abstract": "The adoptive transfer of Tregs is a promising immunotherapeutic strategy for type 1 diabetes mellitus (T1D). A key focus in this field is the creation of antigen-specific CAR-Tregs targeted against pancreatic islet antigens. However, the efficacy of such therapies is potentially limited by the instability of the Treg phenotype in the inflammatory conditions of T1D. This review discusses molecular approaches to overcome this limitation. These include the genetic engineering of cytokine signaling pathways (IL2, IL33/ST2, and IL35) and the cAMP cascade, the management of FOXP3 splicing to ensure stable expression of concrete splice variants, and the use of epigenetic mechanisms to promote a durable Treg identity.",
+          "year": "2025",
+          "journal": "Cells",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        }
+      ],
+      "statement": "In this patient, hypermethylation of the FOXP3 Treg-specific demethylated region (TSDR) in CD4+ T cells \u2014 driven by aberrant DNMT3A upregulation downstream of chronic type I IFN signaling \u2014 destabilizes the Treg lineage commitment program, causing existing Tregs to lose FOXP3 expression and convert toward a pathogenic IL-17-secreting phenotype, thereby reducing measured peripheral Treg frequency independently of impaired de novo Treg generation."
+    },
+    "H2": {
+      "neutral_query": "Persistent moderate SLE disease activity in this patient is mechanistically sustained by a cell-intrinsic defect in STAT5 phosphorylation within CD4+CD25+ Tregs \u2014 caused by chronic upregulation of the phosphatase PTPN2 (TC-PTP) driven by elevated type I IFN \u2014 that renders existing Tregs refractory to available IL-2 concentrations, explaining both the functional Treg insufficiency and the failure of MMF/HCQ to restore tolerance despite directly targeting IL-2/STAT5 signaling.",
+      "pubmed_query": "PTPN2 STAT5 phosphorylation Treg",
+      "tier_queries": [
+        "PTPN2 STAT5 phosphorylation Treg"
+      ],
+      "abstracts": [
+        {
+          "pmid": "42225638",
+          "doi": "10.1038/s41392-026-02584-w",
+          "pmcid": "PMC13226692",
+          "nct_id": null,
+          "title": "Regulatory T cells in cancer and inflammation.",
+          "abstract": "As immunoregulatory cells, regulatory T cells (Tregs) play pivotal roles in maintaining immune tolerance and preventing autoimmunity. However, Tregs exhibit distinct functions across different diseases. In cancer, Tregs are most likely to suppress antitumor immune responses and promote tumor immune evasion, whereas in inflammatory diseases, functionally competent Tregs mitigate excessive immune activation and facilitate tissue repair. Notably, dysfunctional Tregs lead to persistent inflammation and progression to chronic disease. Therefore, targeting Tregs has emerged as an attractive immunotherapeutic strategy for both cancer and inflammatory disorders. Recent studies have shown that Tregs exhibit instability and plasticity under specific conditions, allowing them to shift between functional and dysfunctional states. A comprehensive understanding of the dynamic changes in Tregs and their regulatory mechanisms in diverse pathological contexts is highly important. In this review, we summarize the dual roles of Tregs in cancer and various inflammatory diseases. We explore the signaling pathways and molecular mechanisms underlying their biological characteristics, with a particular focus on how microenvironmental cues shape Treg behavior. Additionally, we discuss recent advances in Treg-targeted therapies in these disease contexts. Overall, this review greatly advances our understanding of the roles of Tregs in cancer and inflammation and helps inform the development of more precise and effective therapeutic strategies.",
+          "year": "2026",
+          "journal": "Signal transduction and targeted therapy",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41567805",
+          "doi": "10.3389/fendo.2025.1740102",
+          "pmcid": "PMC12815805",
+          "nct_id": null,
+          "title": "Regulatory T cell dysfunction and immunotherapeutic breakthroughs in type 1 diabetes.",
+          "abstract": "Type 1 diabetes (T1D) is characterized by the autoimmune destruction of insulin-producing \u03b2-cells in the pancreas. Regulatory T cells (Tregs) are essential for maintaining immune tolerance, but they manifest impaired functionality, particularly within the pancreatic microenvironment, during T1D development. This review aimed to discuss Treg biology including the developmental trajectory, phenotypic heterogeneity, and suppressive function, by which we sought to emphasize their compromised role in T1D pathogenesis associated with genetic/epigenetic factors along with impaired cytokine signaling. The unique chemokine receptor expression signature, migratory capacity, and metabolic adaptation of pancreatic Tregs are highlighted, alongside insights from single-cell studies. The evolution of Treg-based immunotherapies is explored, with emphasis on genetically engineered Tregs (EngTregs), which are designed for the stable ectopic expression of FoxP3 and antigen-specific receptors, such as T cell receptors (TCR) or chimeric antigen receptors (CAR). It also highlights advancements in genome-editing and delivery technologies, along with rationally designed combination strategies incorporated into multifunctional cellular products. Despite encouraging preclinical results, significant challenges persist in clinical translation. Overall, this review synthesizes existing knowledge and outlines future directions in Treg biology and immunotherapy, underscoring the potential of next-generation Treg therapy to achieve durable immune tolerance in T1D.",
+          "year": "2025",
+          "journal": "Frontiers in endocrinology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "42027582",
+          "doi": "10.3389/fcell.2026.1774790",
+          "pmcid": "PMC13099799",
+          "nct_id": null,
+          "title": "Th17/treg balance in Inflammatory Bowel Disease: the role of microbial, and genetic regulators in disease modulation.",
+          "abstract": "Inflammatory Bowel Disease (IBD) is a chronic condition characterized by persistent mucosal inflammation driven by complex interactions among the gut microbiome, host immune genetics, and cellular metabolism. Emerging evidence highlights the central role of the Th17/Treg cell balance in maintaining intestinal immune tolerance, which is tightly regulated by microbe-derived metabolites and host metabolic pathways. In IBD, microbial dysbiosis and altered metabolite profiles disrupt this equilibrium, favoring pro-inflammatory responses. Moreover, genetic variants affecting immune regulation modulate individual susceptibility and disease course. Understanding how microbiome modulation, metabolic reprogramming, and genetic predisposition converge in IBD pathogenesis opens new avenues for precision medicine. This minireview discusses recent advances in this field, emphasizing novel microbiome-targeted strategies, metabolic interventions, and personalized immunomodulatory therapies aimed at restoring Th17/Treg homeostasis. Integrating microbiome, metabolome, and immunogenetic profiling may ultimately guide tailored treatments and improve long-term outcomes in IBD.",
+          "year": "2026",
+          "journal": "Frontiers in cell and developmental biology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 10.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 5.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "42148104",
+          "doi": "10.3389/fimmu.2026.1737202",
+          "pmcid": "PMC13171847",
+          "nct_id": null,
+          "title": "Adapting CAR-T and CAR-Treg cancer therapies for autoimmunity: innovations and challenges.",
+          "abstract": "The application of Chimeric Antigen Receptor T-cell (CAR-T), CAR-engineered regulatory T cell (CAR-Treg) and hematopoietic stem cell (HSC) therapies has grown in recent years, driven by an increasing demand for robust, antigen-specific T lymphocytes for the treatment of both cancer and autoimmune diseases. This review begins by examining existing cell-based therapies, its biological principles and mechanisms, that have helped achieve notable success in treating cancer. The review then discusses the applicability of these approaches to autoimmune diseases such as progressive and relapsing Multiple Sclerosis (MS) and Type 1 Diabetes Mellitus (T1D). We discuss the substantial promise of CAR-T and CAR-Treg therapies and highlight the role of HSCs, while detailing their mechanism of action, manufacturing processes and ongoing clinical trials. We also examine key challenges such as on and off-target effects, dependence on autologous cell sources, high production costs, and lengthy manufacturing timelines. Our review underscores the need for continued research to facilitate broader clinical implementation of these therapies across diverse healthcare settings.",
+          "year": "2026",
+          "journal": "Frontiers in immunology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 8.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 3.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41438753",
+          "doi": "10.3389/fimmu.2025.1669688",
+          "pmcid": "PMC12719510",
+          "nct_id": null,
+          "title": "JAK/STAT in human diseases: a common axis in immunodeficiencies and hematological disorders.",
+          "abstract": "The JAK-STAT signaling pathway (Janus Kinase-Signal Transducer and Activator of Transcription) is a crucial molecular cascade that regulates immune responses, cell proliferation, and hematopoiesis. Germline or somatic mutations affecting this pathway leads to a wide range of pathologies, from severe immunodeficiencies to inflammatory and autoimmune diseases, as well as hematologic malignancies. Loss-of-function mutations impair cytokine signaling and primarily result in immunodeficiency, while gain-of-function mutations cause excessive pathway activation, promoting autoimmune diseases and myeloproliferative syndromes. Advances in our understanding of the JAK-STAT pathway and its involvement in various diseases have opened new perspectives in precision medicine and targeted therapies including JAK inhibitors (JAKi), gene therapy, and hematopoietic stem cell transplantation (HSCT). A detailed understanding of specific mutations and their effects on intracellular signaling allows for the refinement of therapeutic strategies and optimization of patient management. In this review, we examined the biology of the JAK-STAT pathway, highlighted the key pathogenic mutations and their clinical consequences, and described the laboratory and diagnostic approaches used to investigate this pathway.",
+          "year": "2025",
+          "journal": "Frontiers in immunology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 5.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 0.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41692800",
+          "doi": "10.1038/s41392-025-02357-x",
+          "pmcid": "PMC12907296",
+          "nct_id": null,
+          "title": "Lipid metabolism in homeostasis and disease.",
+          "abstract": "Lipid metabolism is essential for maintaining cellular homeostasis, and its dysregulation is linked to various diseases, including cancer, cardiovascular disease, and diabetes. Immune cells, such as macrophages, T cells, B cells, and neutrophils, rely on lipid metabolism for their function, which impacts both innate and adaptive immune responses. Understanding how lipid metabolism influences immune cells is crucial, as it can reveal new therapeutic opportunities for immune-mediated diseases. In this review, we provide a retrospective summary of the research history and milestone events in lipid metabolism research and highlight the importance of lipid metabolism in immune cells. In addition to discussing the various lipid functions, transport, and signaling pathways involved in lipid metabolism, we mainly explore the regulation of immune cell behavior by lipid metabolism, focusing on the roles of lipid metabolites in immune cell proliferation, differentiation, and activation. We further highlight multilevel regulatory mechanisms, including genetic, epigenetic, posttranscriptional, and posttranslational regulation, and their impact on immune cell function. Additionally, we discuss the role of lipid metabolism in diseases such as autoimmune diseases, cancer, neurodegenerative diseases, cardiovascular diseases, aging, and metabolic disorders. Finally, we summarize therapeutic strategies targeting lipid metabolism, the progress of global clinical trials, and future research directions, including lipid-derived biomarkers and innovative therapeutic approaches.",
+          "year": "2026",
+          "journal": "Signal transduction and targeted therapy",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 5.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 0.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "39944077",
+          "doi": "10.1097/in9.0000000000000056",
+          "pmcid": "PMC11812671",
+          "nct_id": null,
+          "title": "Protein phosphatases in systemic autoimmunity.",
+          "abstract": "Protein phosphatases play a critical role in maintaining immune homeostasis by regulating various signaling pathways involved in immune cell activation, differentiation, and function. In the context of systemic autoimmune diseases, dysregulation of phosphatase activity contributes to aberrant immune responses, leading to chronic inflammation and tissue damage. This review explores the role of key phosphatases from the protein serine/threonine phosphatase and protein tyrosine phosphatase families that are implicated in systemic autoimmunity. We discuss their diverse roles in immune cell subsets, the mechanisms by which their dysregulation drives autoimmune pathogenesis, and the therapeutic potential of targeting these enzymes.",
+          "year": "2025",
+          "journal": "Immunometabolism (Cobham, Surrey)",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 5.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 0.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41359111",
+          "doi": "10.1186/s43556-025-00381-5",
+          "pmcid": "PMC12686292",
+          "nct_id": null,
+          "title": "Interferon signaling pathways in health and disease.",
+          "abstract": "Interferons (IFNs) are a family of cytokines that orchestrate a wide range of antiviral, immunoregulatory, and antitumor activities. This review provides a comprehensive overview of the molecular mechanisms underlying IFN signaling, including both canonical JAK (janus\u00a0kinases)-STAT (signal\u00a0transducers and\u00a0activators of\u00a0transcription) pathways and non-canonical branches such as MAPK (mitogen-activated protein kinase) and PI3K (phosphoinositide 3-kinase)-AKT (protein kinase B)-mTOR (mechanistic\u00a0target\u00a0of\u00a0rapamycin). The intricate interplay between these signaling modules and transcriptional, epigenetic, and post-transcriptional regulators is essential for maintaining immune homeostasis and tailoring context-dependent immune responses. Under physiological conditions, IFNs are essential for host defense, driving antiviral gene expression, activating innate immune cells, and shaping adaptive immune responses, including T and B cells. Conversely, dysregulation of IFN signaling contributes to the development of autoimmune diseases, neuroinflammation, cardiovascular disorders, and cancer. Tumor cells can exploit IFN-induced suppressive molecules to evade immune attack. The currently emerging therapeutic strategies of IFN signaling have evolved into a dual strategy: replacement therapy in immunodeficient states, and pathway inhibition in autoimmune conditions. Additionally, IFN-based combination therapies with immune checkpoint blockade and radiotherapy have demonstrated synergistic potential but require precise control of dosing and timing to avoid immune exhaustion. Advances in single-cell transcriptomics, proteomics, and metabolomics are providing novel insights into IFN heterogeneity, enabling the development of personalized IFN-based treatments. This review highlights the clinical implications and emerging strategies to harness or restrain IFN signaling for therapeutic benefit.",
+          "year": "2025",
+          "journal": "Molecular biomedicine",
+          "source": "Europe PMC",
+          "pub_types": [
+            "Research Support, Non-U.S. Gov't",
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 5.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 0.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        }
+      ],
+      "statement": "Persistent moderate SLE disease activity in this patient is mechanistically sustained by a cell-intrinsic defect in STAT5 phosphorylation within CD4+CD25+ Tregs \u2014 caused by chronic upregulation of the phosphatase PTPN2 (TC-PTP) driven by elevated type I IFN \u2014 that renders existing Tregs refractory to available IL-2 concentrations, explaining both the functional Treg insufficiency and the failure of MMF/HCQ to restore tolerance despite not directly targeting IL-2/STAT5 signaling."
+    },
+    "H3": {
+      "neutral_query": "The reduced peripheral Treg frequency in this patient reflects active Treg sequestration into inflamed tissues rather than a systemic numerical deficit, driven by CXCR3 upregulation on Tregs in response to the IFN-\u03b3-rich inflammatory milieu; these tissue-infiltrating Tregs undergo local functional reprogramming into FOXP3+IL-17+ hybrid cells upon exposure to IL-6 and IL-1\u03b2, paradoxically amplifying local inflammation while depleting the peripheral Treg pool \u2014 a mechanism addressed by MMF or HCQ.",
+      "pubmed_query": "CXCR3 Treg tissue infiltration inflammation",
+      "tier_queries": [
+        "CXCR3 Treg tissue infiltration inflammation"
+      ],
+      "abstracts": [
+        {
+          "pmid": "42039205",
+          "doi": "10.3389/fimmu.2026.1759023",
+          "pmcid": "PMC13106435",
+          "nct_id": null,
+          "title": "Targeting regulatory T cells in glioblastoma: from mechanistic insights to novel immunotherapeutic strategies.",
+          "abstract": "Glioblastoma (GBM), the most common and aggressive primary brain tumor in adults, remains a formidable therapeutic challenge. Within the immunosuppressive tumor microenvironment, regulatory T cells (Tregs) have attracted increasing attention for their pivotal role in facilitating tumor immune evasion and sustaining immunosuppression. Through diverse mechanisms, Tregs potently inhibit anti-tumor immunity, thereby driving tumor progression and contributing to therapeutic resistance, which collectively correlates with poor clinical outcomes. This review systematically outlines the biological features and regulatory networks of Tregs in GBM, with particular emphasis on emerging strategies designed to target these cells. We discuss approaches such as Treg depletion, interference with their recruitment, functional reprogramming, and combination immunotherapies. Furthermore, we critically assess the translational progress and clinical limitations of these approaches, including challenges related to target specificity, immune adaptation, and treatment-related toxicities. By synthesizing mechanistic insights with therapeutic prospects, this review aims to inform future directions in precision immunotherapy and inspire multidisciplinary efforts toward effective Treg-targeting regimens for GBM.",
+          "year": "2026",
+          "journal": "Frontiers in immunology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "42233009",
+          "doi": "10.3389/fimmu.2026.1844106",
+          "pmcid": "PMC13222973",
+          "nct_id": null,
+          "title": "Regulatory T cells in vitiligo: a review of functional disequilibrium between peripheral blood and lesional tissue.",
+          "abstract": "IntroductionVitiligo is an autoimmune skin disorder driven by CD8+ T cell-mediated melanocyte destruction, in which breakdown of immune tolerance plays a pivotal role. Regulatory T cells (Tregs) are central to maintaining peripheral immune tolerance, but their abnormalities in vitiligo remain insufficiently integrated from a systemic perspective.MethodsThis review synthesizes published evidence on Treg biology and immunoregulatory functions, focusing on comparative analyses between peripheral blood and lesional skin of vitiligo patients. We also examine Treg-melanocyte interaction networks, Treg-targeted therapies, and the potential of Treg-related biomarkers.ResultsIn peripheral blood, vitiligo patients exhibit reduced Treg frequency, impaired suppressive capacity, and Th1-like polarization, alongside dysfunctional subsets such as STAM (signal-transducing adaptor molecule)+ Treg and exhausted memory Treg. In lesional skin, tissue-resident and antigen-specific Treg subsets are markedly decreased, and the proinflammatory microenvironment further compromises their function. This systemic-to-local Treg dysregulation leads to insufficient suppression of autoreactive CD8+ T cells and persistent melanocyte destruction. Mechanistically, breakdown of the protective Treg-melanocyte network involves systemic Treg deficits, failure of local tolerance, melanocyte-intrinsic death programs, and disrupted homing/signaling. Therapeutically, NB-UVB, JAK inhibitors, and low-dose IL-2 show promise in restoring immune balance, and emerging Treg subsets may serve as biomarkers for treatment response.DiscussionThe anatomical hierarchy of Treg dysregulation-from blood to skin-underscores that effective immunosuppression requires not only sufficient Treg numbers but also precise tissue localization and functional adaptation. Future single-cell transcriptomics and functionally defined Treg subsets may facilitate translation of Treg-based biomarkers and therapies into practice.",
+          "year": "2026",
+          "journal": "Frontiers in immunology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41890756",
+          "doi": "10.3389/fimmu.2026.1779388",
+          "pmcid": "PMC13013285",
+          "nct_id": null,
+          "title": "Targeting the chemokine-Treg axes in tumor immune evasion: from mechanisms to therapeutic opportunities.",
+          "abstract": "Cancer immunotherapy has transformed oncology, yet its clinical efficacy is often limited by immune evasion within the tumor microenvironment (TME). Regulatory T cells (Tregs), a key immunosuppressive lineage, potently inhibit effector T-cell proliferation and activation, thereby dampening antitumor immune responses. Tregs are frequently enriched in diverse solid tumors, and their abundance correlates with poor prognosis, increased tumor invasiveness, and therapeutic resistance. A major mechanism driving this enrichment is the chemokine-chemokine receptor axis. Tumor cells, along with other stromal and immune cells in the TME, secrete chemokines including CCL22, CCL20, and CXCL12, which bind to CCR4, CCR6, and CXCR4 on Tregs and direct their recruitment and activation within the TME. This establishes an immunosuppressive niche that promotes tumor growth, facilitates metastasis, and reduces responsiveness to immunotherapy. This review consolidates eight experimentally validated chemokine-Treg axes from 2005 to 2025, with each study annotated by tumor type and represented by the highest observed level of evidence. A systematic representation illustrates how these axes mediate Treg-driven immunosuppression and maps their prevalence across cancers. Focusing on these axes provides mechanistic insights, highlights potential therapeutic targets, and identifies predictive biomarkers. Strategies targeting the chemokine-chemokine receptor axes, including selective receptor blockade, combination with immune checkpoint inhibitors, and omics-based approaches to resolve Treg heterogeneity, offer avenues to reprogram the immunosuppressive TME and enhance antitumor immunity.",
+          "year": "2026",
+          "journal": "Frontiers in immunology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 11.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 6.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "42338761",
+          "doi": "10.2147/dddt.s614133",
+          "pmcid": "PMC13285914",
+          "nct_id": null,
+          "title": "Artemisinin-Related Therapeutic Strategies for Autoimmune Thyroiditis: Chemokine-Receptor Networks, Spatial Thyroid Biology, and Molecular Mechanisms.",
+          "abstract": "Autoimmune thyroiditis (AIT) is a chronic immune-mediated thyroid disorder characterized by lymphocytic infiltration, follicular epithelial injury, autoantibody production, and variable progression to thyroid dysfunction. Because current management is largely supportive or replacement based, there is growing interest in interventions that might modify inflammatory and immune processes before irreversible tissue damage develops. This narrative review critically evaluates the potential, but not yet established, role of Artemisia-derived and artemisinin-related compounds in AIT. The analysis focuses on chemokine-receptor networks, spatial organization of thyroid inflammation, and molecular mechanisms linking endoperoxide/redox chemistry, innate immune signaling, and immune-cell trafficking. Evidence was identified through targeted, non-systematic searches of PubMed and Google Scholar, supported by backward and forward citation tracking. Thyroid-specific evidence remains limited and predominantly preclinical. Dihydroartemisinin (DHA) has been reported to attenuate experimental autoimmune thyroiditis by reducing inflammatory infiltration, thyroid autoantibodies, Th1/Th17-associated responses, CXCL10/CXCR3-linked signaling, and oxidative stress. Evidence from non-thyroid autoimmune and inflammatory models suggests additional effects on NF-\u03baB, MAPK, PI3K/Akt/mTOR, JAK/STAT, TLR/MyD88, NRF2/GPX4-related redox responses, inflammasome activity, regulatory T-cell balance, and possible epigenetic remodeling; however, these findings should be treated as mechanistic context rather than direct evidence for human AIT. Most available studies involve purified or semi-synthetic compounds rather than standardized botanical preparations, and robust clinical validation is absent. Artemisinin-related compounds are therefore framed as hypothesis-driven immunomodulatory candidates that require thyroid-specific replication, target validation, comparative pharmacology, safety assessment, formulation standardization, and carefully designed translational studies before clinical application can be considered.",
+          "year": "2026",
+          "journal": "Drug design, development and therapy",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 8.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 3.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "42344912",
+          "doi": "10.3389/fimmu.2026.1823949",
+          "pmcid": "PMC13286923",
+          "nct_id": null,
+          "title": "Single-cell transcriptomic insights into the immune heterogeneity of immune checkpoint inhibitors related organ toxicities.",
+          "abstract": "Immune checkpoint inhibitors (ICIs) have revolutionized cancer therapy, but their increasing clinical use has led to an increasing incidence of immune-related adverse events (irAEs), among which colitis and cardiotoxicity are particularly severe, compromising both quality of life and therapeutic outcomes. Recent advances in single-cell RNA sequencing (scRNA-seq) have enabled high-resolution profiling of immune cell heterogeneity, offering new insights into the mechanisms of irAEs. By dissecting immune cell phenotypes and interactions across affected organs, scRNA-seq helps to clarify the pathogenesis of toxicity and supports the development of personalized immunomodulatory strategies. In this review, we summarize the clinical features, underlying mechanisms, and immune landscape of ICI-associated colitis and cardiotoxicity. Through comparative analysis, we highlight shared mechanisms-such as T cell clonal expansion, IFN-\u03b3/IL-1\u03b2-driven inflammatory circuits, and JAK-STAT signaling-as well as organ-specific features, including microbiota-dependent regulation in colitis and autoantigen-initiated responses in myocarditis. We also explore emerging therapeutic targets and biomarkers identified by scRNA-seq and discuss their application in other irAEs, such as pneumonitis. Together, this work underscores the value of single-cell technologies in elucidating irAE heterogeneity, advancing irAEs management from reactive response to precise prevention, and guiding future translational research.",
+          "year": "2026",
+          "journal": "Frontiers in immunology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 8.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 3.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "41884484",
+          "doi": "10.2147/dddt.s544545",
+          "pmcid": "PMC13010174",
+          "nct_id": null,
+          "title": "The Dual Role of IP-10/CXCL10 in Liver Injury: From Pathogenic Mediator to Clinical Biomarker and Therapeutic Target.",
+          "abstract": "A complex interplay of immune and inflammatory mechanisms underlies liver injury, with the chemokine interferon-gamma-induced protein 10 (IP-10/CXCL10) playing a decisive role. Recent findings identify IP-10 as a key pathogenic mediator; by binding its receptor CXCR3, it directly recruits cytotoxic T lymphocytes and NK cells to the liver, promoting hepatocyte apoptosis and driving inflammation. This chemokine also activates hepatic stellate cells (HSCs), stimulating fibrogenesis and disease progression in conditions ranging from viral hepatitis to metabolic steatotic liver disease (MASLD) and cirrhosis. Consequently, IP-10\u00a0has emerged as a sensitive biomarker for liver inflammation and fibrosis. This review highlights these mechanistic insights, linking CXCL10's causal roles to its diagnostic, prognostic, and therapeutic potential. We examine its utility in early detection, risk stratification, and targeted therapies to modulate immune responses and reduce fibrosis. We also discuss innovative applications in personalized medicine and precision diagnostics that offer new opportunities to improve outcomes in viral hepatitis and other liver diseases. By integrating mechanistic understanding with clinical implications, this work clarifies the multifaceted role of CXCL10 and identifies future research directions to optimize its therapeutic and diagnostic applications.",
+          "year": "2026",
+          "journal": "Drug design, development and therapy",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 8.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 3.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "42327747",
+          "doi": "10.3389/fimmu.2026.1752354",
+          "pmcid": "PMC13275462",
+          "nct_id": null,
+          "title": "Mechanisms and biomarkers of immune checkpoint inhibitor-associated myocarditis: from T cell imbalance to multicellular crosstalk.",
+          "abstract": "Immune checkpoint inhibitors (ICIs) have transformed cancer therapy but can induce immune-related myocarditis (ICI-MC), a rare yet life-threatening toxicity. This review elucidates the cellular and molecular mechanisms underlying ICI-MC, integrating insights from T-cell dysregulation, innate immunity, and stromal interactions. Pathogenesis involves \u03b1-myosin-driven clonal expansion of cytotoxic CD8+ T cells, loss of regulatory subsets, and macrophage polarization toward M1 phenotypes via cGAS-STING and STAT1/NF-\u03baB pathways. Crosstalk among macrophages, fibroblasts, endothelial cells, neutrophils, and B cells amplifies myocardial inflammation through chemokine and complement activation. A five-phase multicellular framework-baseline autoreactivity, checkpoint blockade, clonal expansion, effector execution, and inflammatory amplification-summarizes disease evolution. Candidate biomarkers and targeted therapies offer precision strategies to mitigate cardiotoxicity. Future single-cell and multi-omics studies are essential to refine diagnosis and develop cardioprotective interventions without compromising antitumor efficacy.",
+          "year": "2026",
+          "journal": "Frontiers in immunology",
+          "source": "Europe PMC",
+          "pub_types": [
+            "review-article",
+            "Review",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 7.0,
+          "_rank_breakdown": {
+            "study_type": 2.0,
+            "relevance": 2.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        },
+        {
+          "pmid": "42320987",
+          "doi": "10.1136/jitc-2026-015632",
+          "pmcid": "PMC13289364",
+          "nct_id": null,
+          "title": "Comprehensive characterization of the inflammatory ecosystems in immunotherapy-induced adverse events versus chronic inflammatory diseases.",
+          "abstract": "BackgroundImmune-related adverse events (irAEs) induced by immune checkpoint inhibitors (ICIs) share symptomatic and therapeutic similarities with chronic inflammatory diseases (CIDs). However, the molecular distinctions between irAEs and CIDs remain unclear. Herein, we systematically compared irAEs and CIDs across multiple tissues using large-scale multi-omics profiling.MethodsWe compiled a transcriptomic compendium of over 4.3\u2009million cells from 1137 samples and 24 spatial transcriptomes across diverse inflammatory sites in irAEs and CIDs. In addition, we collected 526 pre-ICI and post-ICI treatment-matched blood transcriptomes coupled with germline exomes, alongside 75 serum proteomes with irAE information.ResultsHallmark gene signatures and cell states that characterize the inflammatory milieu of various irAEs and CIDs were defined. Across tissues, irAEs involve a distinct inflammatory ecosystem enriched with myeloid-derived components, including NLRP3 + mononuclear phagocytes, LAMP3 + dendritic cells, and CXCL8/10 cytokine signaling, alongside TNFRSF18 + regulatory T cell, T/natural killer interferon, and HAVCR2 + exhausted T cell. These cell states exhibit unique interaction patterns, forming spatially localized niches specific to irAEs but absent in CIDs. Severe irAEs are accompanied by elevated CXCL10 cytokine signaling post-ICI treatment, with a higher prevalence among HLA-B*46:01 carriers.ConclusionsOur multimodal analyses highlight key differences between irAEs and CIDs, indicating that irAEs constitute a distinct inflammatory ecosystem that differentiates them from CIDs. Our study provides insights into potential biomarkers and therapeutic targets for improved irAE management.",
+          "year": "2026",
+          "journal": "Journal for immunotherapy of cancer",
+          "source": "Europe PMC",
+          "pub_types": [
+            "research-article",
+            "Journal Article"
+          ],
+          "source_db": "europepmc",
+          "_rank_score": 6.0,
+          "_rank_breakdown": {
+            "study_type": 0.0,
+            "relevance": 3.0,
+            "recency": 2.0,
+            "fulltext": 1.0,
+            "citations": 0.0,
+            "penalty": 0.0
+          }
+        }
+      ],
+      "statement": "The reduced peripheral Treg frequency in this patient reflects active Treg sequestration into inflamed tissues rather than a systemic numerical deficit, driven by CXCR3 upregulation on Tregs in response to the IFN-\u03b3-rich inflammatory milieu; these tissue-infiltrating Tregs undergo local functional reprogramming into FOXP3+IL-17+ hybrid cells upon exposure to IL-6 and IL-1\u03b2, paradoxically amplifying local inflammation while depleting the peripheral Treg pool \u2014 a mechanism not addressed by MMF or HCQ."
+    }
+  },
+  "selected_experiment_hypothesis_id": "H2",
+  "dataset_pointer": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE278572",
+  "run_started_at": "2026-07-11T17:40:01.290492+00:00",
+  "generated_at": "2026-07-11T17:43:05.925242+00:00",
+  "token_spend": {
+    "calls": 17,
+    "input_tokens": 22664,
+    "output_tokens": 13606,
+    "total_tokens": 36270
+  }
+}
+
+[disclaimer]
+Research hypothesis generation only. Not clinical, diagnostic, or prescribing advice.
+
+--- metadata ---
+{
+  "resources": "wall 0.0s · cpu 0.0s · peak rss 17 MB"
+}

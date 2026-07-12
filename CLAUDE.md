@@ -58,6 +58,7 @@ deliberately **not** auto-loaded, to save context).
 7. **Options always include a free-typed answer.** When you ask the user to choose, use
    `AskUserQuestion` (its "Other" field lets them type their own), and say so: "…or type your own."
    Never trap the user in a fixed menu.
+   Always the questions should have plain-language explaination and a technical explanation for question as well as the options along with the consequences and drawbacks of each 
 8. **Token & tool discipline.** Batch independent tool calls into one step. Prefer targeted reads
    over whole files; don't re-read what you've seen. Spawn a subagent only when the task genuinely
    fans out. Don't auto-load the playbook. Wasted tokens are a bug.
@@ -75,7 +76,7 @@ deliberately **not** auto-loaded, to save context).
 
 Definitions live in `.claude/agents/`. Invoke via the Agent/Task tool by name.
 
-**Model routing.** Run the main session on **Opus** (`claude --model opus`) so routine work stays fast
+**Model routing.** Run the main session on **Opus** (`claude --model Opus`) so routine work stays fast
 and cheap, and **escalate genuinely hard, self-contained reasoning to the `deep-reasoning` sub-agent
 (Fable)**. Don't over-delegate — most work should finish on the main session; reach for Fable only when
 the problem is actually hard, and hand it the exact files/symptoms (it starts with fresh context).
