@@ -37,19 +37,6 @@ handles whatever you paste in.
 
 ---
 
-## 🎥 Demo (3-minute video)
-
-**▶ Watch the walkthrough:** _add-your-link-here_ — a real de-identified case → a grounded brief with
-live PubMed citations → the experiment run inside Claude Science → and the **honest refusal** when the
-evidence is too thin to ship.
-
-**📁 Don't take the video's word for it — verify the results:** the exact run behind this walkthrough
-lives in [`golden-test-results/`](golden-test-results/) — TransBench's golden brief **and** the
-PTPN2 / type-I-IFN experiment Claude Science actually executed from it (dataset GEO GSE278572), with the
-composite figure, the FDR-corrected statistics table, all 41 references, and a `MANIFEST.md` of sha256
-checksums for every file. The brief there is **byte-identical** to `snapshots/autoimmune_sle_treg_golden_brief.json`,
-so golden mode replays precisely what the video shows.
-
 ## ⚡ Try it yourself — no API key, two commands
 
 Golden mode replays a real, committed run **byte-for-byte** — nothing to configure, no key, instant:
@@ -106,6 +93,21 @@ Then you get **two ways to use it** — the installer sets up the first and offe
 > ⚕️ You'll need your own Anthropic API key (from [console.anthropic.com](https://console.anthropic.com)),
 > and — because the reasoning uses Anthropic's cloud API + PubMed — **de-identify** every observation
 > first (age band + presentation only; no names, MRNs, or dates).
+
+---
+
+## 🎥 Demo (3-minute video)
+
+**▶ Watch the walkthrough:** _add-your-link-here_ — a real de-identified case → a grounded brief with
+live PubMed citations → the experiment run inside Claude Science → and the **honest refusal** when the
+evidence is too thin to ship.
+
+**📁 Don't take the video's word for it — verify the results:** the exact run behind this walkthrough
+lives in [`golden-test-results/`](golden-test-results/) — TransBench's golden brief **and** the
+PTPN2 / type-I-IFN experiment Claude Science actually executed from it (dataset GEO GSE278572), with the
+composite figure, the FDR-corrected statistics table, all 41 references, and a `MANIFEST.md` of sha256
+checksums for every file. The brief there is **byte-identical** to `snapshots/autoimmune_sle_treg_golden_brief.json`,
+so golden mode replays precisely what the video shows.
 
 ---
 
