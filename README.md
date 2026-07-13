@@ -2,7 +2,6 @@
 
 > 🏆 **Built for [Built with Claude: Life Sciences](https://cerebralvalley.ai/e/built-with-claude-life-sciences)** — Anthropic × Gladstone Institutes × Cerebral Valley · **Development Track**
 > 👨‍⚕️ **Built by Dr. Kayomarz** — internal-medicine physician & AI engineer · [kayomarz.com](https://kayomarz.com)
-> ▶️ **[Watch the 3-minute demo film](https://youtu.be/RFRhDaPUonE)** · 🎬 filmed, animated & edited entirely by Claude Code — [see how (TransBench-demo)](https://github.com/kayomarz97/TransBench-demo)
 
 **A translational research agent that turns a clinician's bedside observation into a
 grounded, testable, bench-ready experiment — shipped as an MCP connector for Claude Science.**
