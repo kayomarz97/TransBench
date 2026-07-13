@@ -96,9 +96,13 @@ Then you get **two ways to use it** — the installer sets up the first and offe
 
 ## 🎥 Demo (3-minute video)
 
-**▶ Watch the walkthrough:** https://youtu.be/RFRhDaPUonE — a real de-identified case → a grounded brief with
-live PubMed citations → the experiment run inside Claude Science → and the **honest refusal** when the
-evidence is too thin to ship.
+**▶ Watch the 3-minute walkthrough → [youtu.be/RFRhDaPUonE](https://youtu.be/RFRhDaPUonE)** — a real
+de-identified case → a grounded brief with live PubMed citations → the experiment run inside Claude
+Science → and the **honest refusal** when the evidence is too thin to ship.
+
+[![Watch the TransBench walkthrough on YouTube](https://github.com/kayomarz97/TransBench-demo/raw/main/demo_video/thumbnail.png)](https://youtu.be/RFRhDaPUonE)
+
+**🎬 How this film was made — with zero video-editing skills:** [github.com/kayomarz97/TransBench-demo](https://github.com/kayomarz97/TransBench-demo) — the HTML scenes, the deterministic frame-capture pipeline, and the making-of trail.
 
 **📁 Don't take the video's word for it — verify the results:** the exact run behind this walkthrough
 lives in [`golden-test-results/`](golden-test-results/) — TransBench's golden brief **and** the
