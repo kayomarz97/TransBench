@@ -280,7 +280,7 @@ def build_without_with(goldens: dict[str, dict]) -> str:
     W = 900
     f = Fig(W, right="plain LLM  vs.  the connector")
     f.text(f.cx0, f.y, "Same question. One connector of difference.", INK, 21, "800")
-    f.text(f.cx0, f.y + 23, "Every number below is counted from four real, committed runs — no mock-ups.",
+    f.text(f.cx0, f.y + 23, f"Every number below is counted from {n} real, committed runs — no mock-ups.",
            MUTED, 12.5, "500")
     f.y += 50
 
@@ -357,21 +357,22 @@ def build_without_with(goldens: dict[str, dict]) -> str:
     f.text(f.cx0, f.y + 4, "Research hypothesis generation only. Not clinical, diagnostic, or prescribing advice.",
            FAINT, 10.5, "500")
     f.y += 8
-    return f.render("Plain LLM vs the TransBench connector, quantified on four real captured runs: "
+    return f.render(f"Plain LLM vs the TransBench connector, quantified on {n} real captured runs: "
                     f"{n} domains, {shipped} experiments shipped, {gated} gated out, {caught} unverifiable "
                     "datasets caught, 0 fabricated citations.")
 
 
-def build_in_action(t2d: dict) -> str:
+def build_in_action(golden: dict, headline: str, alt: str,
+                    sub: str = "MCP connector · live-captured run") -> str:
     W = 900
-    f = Fig(W, right="generate_experiment()", sub="MCP connector · live-captured run")
-    obs = t2d["request_echo"]
-    axes = [a["axis"] for a in t2d["axes"]]
-    hyps = t2d["hypotheses"]
-    te = t2d["top_experiment"]
-    refs = len(t2d["references"])
+    f = Fig(W, right="generate_experiment()", sub=sub)
+    obs = golden["request_echo"]
+    axes = [a["axis"] for a in golden["axes"]]
+    hyps = golden["hypotheses"]
+    te = golden["top_experiment"]
+    refs = len(golden["references"])
 
-    f.text(f.cx0, f.y, "A real type 2 diabetes run, field by field", INK, 20, "800")
+    f.text(f.cx0, f.y, headline, INK, 20, "800")
     tw = f.pill(f.cx1 - 96, f.y - 5, "temperature 0", PANEL2, txt=INK2, size=11, weight="700", bd=BORDER)
     f.y += 30
 
@@ -396,6 +397,9 @@ def build_in_action(t2d: dict) -> str:
         hid = h["hypothesis"]["id"]
         pmids = [e["reference"].get("pmid") for e in h.get("evidence", []) if e.get("reference")]
         pmids = [p for p in pmids if p]
+        # cap the inline PMID list so a heavily-cited hypothesis (e.g. the SLE run's H2) can't
+        # overflow the card; T2D's grounded hypothesis has 2 PMIDs, so this is a no-op there.
+        pm_label = "PMID " + ", ".join(pmids[:4]) + (f"  +{len(pmids) - 4} more" if len(pmids) > 4 else "")
         by = f.y + 6
         if h.get("grounded"):
             f.dot(f.cx0 + 5, by - 4, GREEN)
@@ -403,7 +407,7 @@ def build_in_action(t2d: dict) -> str:
             pw = f.pill(f.cx0 + 46, by - 4, "GROUNDED", GREEN, size=10.5, weight="800")
             detail = f"open question · supports {h['supporting_count']}"
             f.text(f.cx0 + 46 + pw + 10, by, detail, INK2, 12, "500")
-            f.text(f.cx0 + 46 + pw + 10 + approx_w(detail, 12) + 10, by, "PMID " + ", ".join(pmids),
+            f.text(f.cx0 + 46 + pw + 10 + approx_w(detail, 12) + 10, by, pm_label,
                    TEAL, 12, "600", mono=True)
         else:
             f.ring(f.cx0 + 5, by - 4, FAINT)
@@ -416,16 +420,21 @@ def build_in_action(t2d: dict) -> str:
     # -- top experiment --------------------------------------------------------
     section(f, "Top experiment", "only the grounded hypothesis is promoted")
     q_lines = wrap_px(te.get("question") or "", f.cwidth - 130, 12.5)
-    eh = 30 + 26 + len(q_lines) * 18 + 26 + 14
+    vw = pill_w("verified · resolvable", 10.5)
+    # dataset names vary in length (a short atlas label vs a long Gladstone accession title),
+    # so wrap the value and leave room on the first line for the right-aligned "verified" pill.
+    ds_lines = wrap_px(te.get("dataset") or "", f.cwidth - 108 - vw - 26, 12.5)
+    ds_extra = (len(ds_lines) - 1) * 18
+    eh = 30 + 26 + ds_extra + len(q_lines) * 18 + 26 + 14
     top = f.y - 4
     f.rrect(f.cx0, top, f.cwidth, eh, GREEN_T, rx=11, stroke=GREEN_BD)
     f.accent(f.cx0 + 10, top + 10, eh - 20, GREEN)
     iy = top + 24
     f.text(f.cx0 + 24, iy, "dataset", MUTED, 11, "700")
-    f.text(f.cx0 + 108, iy, te.get("dataset") or "", INK, 12.5, "700")
-    vw = pill_w("verified · resolvable", 10.5)
+    for k, ln in enumerate(ds_lines):
+        f.text(f.cx0 + 108, iy + k * 18, ln, INK, 12.5, "700")
     f.pill(f.cx0 + f.cwidth - 16 - vw, iy - 4, "verified · resolvable", PURPLE_T, txt=PURPLE, size=10.5, weight="800", bd=PURPLE_BD)
-    iy += 26
+    iy += 26 + ds_extra
     f.text(f.cx0 + 24, iy, "question", MUTED, 11, "700")
     for k, ln in enumerate(q_lines):
         f.text(f.cx0 + 108, iy + k * 18, ln, INK2, 12.5, "500")
@@ -696,12 +705,30 @@ def build_architecture() -> str:
 def main() -> None:
     goldens = {p.stem: json.loads(p.read_text()) for p in sorted(SNAP.glob("*_golden_brief.json"))}
     t2d = goldens["metabolic_t2d_golden_brief"]
+    sle = goldens["autoimmune_sle_treg_golden_brief"]
+    # per-card headline + aria description; the card BODY is fully data-driven from the golden.
+    t2d_alt = ("TransBench generate_experiment output for a type 2 diabetes observation: four decomposed "
+               "axes, H2 grounded with PMIDs 37546319 and 39422716 while H1 and H3 are demoted as "
+               "ungrounded, a top experiment on hepatocyte transporter expression in a verified Tabula "
+               f"Sapiens dataset with a {len(t2d['top_experiment'].get('protocol_steps') or [])}-step "
+               f"protocol, and a paste-ready claude_science_prompt. {len(t2d['references'])} references, "
+               "temperature 0.")
+    sle_alt = ("TransBench generate_experiment output for a lupus (SLE) observation on the Gladstone "
+               "dataset: six decomposed axes, three hypotheses (H2 and H3 grounded against real "
+               "citations, H1 demoted as ungrounded), a top experiment probing PTPN2 in CD4+ regulatory "
+               "vs conventional T cells in the content-verified Gladstone/Marson Perturb-CITE-seq dataset "
+               f"GSE278572 with a {len(sle['top_experiment'].get('protocol_steps') or [])}-step protocol, "
+               f"and a paste-ready claude_science_prompt. {len(sle['references'])} references, temperature 0.")
     (IMG / "without-with.svg").write_text(build_without_with(goldens))
-    (IMG / "in-action-t2d.svg").write_text(build_in_action(t2d))
+    (IMG / "in-action-t2d.svg").write_text(
+        build_in_action(t2d, "A real type 2 diabetes run, field by field", t2d_alt))
+    (IMG / "in-action-sle.svg").write_text(
+        build_in_action(sle, "A real lupus (SLE) run — the Gladstone dataset, field by field", sle_alt,
+                        sub="MCP connector · live-captured Gladstone run"))
     (IMG / "claude-science-flow.svg").write_text(build_flow())
     (IMG / "pipeline.svg").write_text(build_pipeline())
     (IMG / "architecture.svg").write_text(build_architecture())
-    print("wrote: without-with · in-action-t2d · claude-science-flow · pipeline · architecture")
+    print("wrote: without-with · in-action-t2d · in-action-sle · claude-science-flow · pipeline · architecture")
     print("scoreboard domains:", list(goldens))
 
 

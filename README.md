@@ -18,8 +18,8 @@ and — for whatever survives — hands you *one runnable computational experime
 public dataset and a paste-ready prompt for Claude Science.
 
 It works for **any** disease, drug, or mechanism — not one fixed specialty. The examples below span
-type 2 diabetes, resistant hypertension, melanoma, and rheumatoid arthritis, and the same pipeline
-handles whatever you paste in.
+lupus (on the Gladstone dataset), type 2 diabetes, resistant hypertension, melanoma, and rheumatoid
+arthritis, and the same pipeline handles whatever you paste in.
 
 <img src="docs/img/claude-science-flow.svg" alt="How the TransBench MCP connector runs: a free-text clinician observation flows through the TransBench engine (8 agents, 3 rigor gates) to a grounded brief, then a content-verified dataset and a paste-ready claude_science_prompt that Claude Science turns into a reproducible figure. The connector exposes generate_experiment, search_grounded_evidence, and get_experiment_result." width="860">
 
@@ -88,14 +88,15 @@ Then you get **two ways to use it** — the installer sets up the first and offe
 - **Three Claude tiers** run the pipeline — **Opus 4.8** (hypothesize + experiment design, the two
   quality levers), **Sonnet** (decompose + novelty), **Haiku** (grade / entail / assemble).
 - **Dataset-agnostic:** it names *and content-verifies* public datasets (GEO, Tabula Sapiens) — and
-  is built to target this hackathon's **Gladstone-provided** data (T-cell sequencing,
-  regulatory-activity prediction, protein-interaction networks).
+  **hits this hackathon's Gladstone data directly**: the flagship run ships a PTPN2-in-Tregs
+  experiment on **Gladstone's own GSE278572** (Marson-lab Treg/Teff Perturb-CITE-seq), executed
+  end-to-end in Claude Science (see [`golden-test-results/`](golden-test-results/)).
 
 ---
 
 ## 🎥 Demo (3-minute video)
 
-**▶ Watch the walkthrough:** _add-your-link-here_ — a real de-identified case → a grounded brief with
+**▶ Watch the walkthrough:** https://youtu.be/RFRhDaPUonE — a real de-identified case → a grounded brief with
 live PubMed citations → the experiment run inside Claude Science → and the **honest refusal** when the
 evidence is too thin to ship.
 
@@ -169,7 +170,7 @@ conversation with a computational biologist. Most sparks never make that trip.
 
 **Why it's trustworthy.** The single most important behavior: **when the evidence isn't there,
 TransBench says so and ships nothing, rather than inventing a plausible-sounding answer.** In the
-four real runs shown below, it produced experiments for two domains and *deliberately declined* for
+five real runs shown below, it produced experiments for three domains and *deliberately declined* for
 two — because no hypothesis cleared the evidence bar. That refusal is the feature.
 
 ---
@@ -198,9 +199,9 @@ the work, with three hard quality gates in the middle that anything unsupported 
 A general-purpose chatbot will happily answer *any* mechanistic question — confidently, with
 citations that look real, a "novel" mechanism that's actually in every textbook, and a dataset
 accession that may not exist. TransBench is built to make each of those failure modes impossible.
-The numbers below are counted from the four real runs in [`snapshots/`](snapshots/):
+The numbers below are counted from the five real runs in [`snapshots/`](snapshots/):
 
-<img src="docs/img/without-with.svg" alt="Side-by-side: a plain LLM fabricates citations, reframes textbook facts as novel, and names datasets that may not exist; TransBench grounds every citation, demotes established claims, content-verifies datasets, and refuses to ship when nothing clears the bar. Scoreboard: 4 real domains, 2 experiments shipped, 2 correctly gated out, 2 unverifiable datasets caught, 0 fabricated citations." width="820">
+<img src="docs/img/without-with.svg" alt="Side-by-side: a plain LLM fabricates citations, reframes textbook facts as novel, and names datasets that may not exist; TransBench grounds every citation, demotes established claims, content-verifies datasets, and refuses to ship when nothing clears the bar. Scoreboard: 5 real domains, 3 experiments shipped, 2 correctly gated out, 2 unverifiable datasets caught, 0 fabricated citations." width="820">
 
 | | Plain LLM (no connector) | **TransBench connector** |
 |---|---|---|
@@ -220,8 +221,33 @@ pinned, guaranteed-resolvable atlas, recorded transparently in the brief's `feas
 
 ## See it in action
 
-Real, live-captured output for a **type 2 diabetes** observation — every field below is served
-verbatim from [`snapshots/metabolic_t2d_golden_brief.json`](snapshots/metabolic_t2d_golden_brief.json):
+**The Gladstone run — a real, live-captured lupus (SLE) case.** Every field below is served verbatim
+from [`snapshots/autoimmune_sle_treg_golden_brief.json`](snapshots/autoimmune_sle_treg_golden_brief.json)
+— the same brief drives the experiment Claude Science actually executed in
+[`golden-test-results/`](golden-test-results/).
+
+<img src="docs/img/in-action-sle.svg" alt="TransBench generate_experiment output for a lupus (SLE) observation on the Gladstone dataset: six decomposed axes, three hypotheses (H2 and H3 grounded against real citations, H1 demoted as ungrounded), a top experiment probing PTPN2 in CD4+ regulatory vs conventional T cells in the content-verified Gladstone/Marson Perturb-CITE-seq dataset GSE278572 with a 9-step protocol, and a paste-ready claude_science_prompt. 41 references, temperature 0." width="820">
+
+The proposed substrate is **Gladstone's own dataset, GSE278572** (Marson-lab Treg/Teff
+Perturb-CITE-seq), and the shipped experiment probes **PTPN2 in CD4+ regulatory vs conventional
+T cells** with a type-I-interferon / STAT5 read-out — grounded in **41 real citations**.
+
+Reproduce it yourself in seconds — **no API key needed** (golden mode replays the committed brief):
+
+```bash
+TRANSBENCH_MODE=golden PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c "
+import asyncio
+from transbench.engine import run_transbench
+brief = asyncio.run(run_transbench(
+    '32F with systemic lupus erythematosus and persistent moderate disease activity despite '
+    'hydroxychloroquine and mycophenolate mofetil at target doses; peripheral blood shows reduced '
+    'CD4+CD25+FOXP3+ regulatory T-cell frequency; incomplete response to standard immunosuppression.'))
+print(brief.top_experiment.claude_science_prompt)
+"
+```
+
+**A second domain — type 2 diabetes.** Every field below is served verbatim from
+[`snapshots/metabolic_t2d_golden_brief.json`](snapshots/metabolic_t2d_golden_brief.json):
 
 <img src="docs/img/in-action-t2d.svg" alt="TransBench generate_experiment output for a type 2 diabetes observation: four decomposed axes, three hypotheses (H2 grounded with PMIDs 37546319 and 39422716, H1 and H3 demoted as ungrounded), a top experiment on OCT1/OCT3 hepatocyte expression in Tabula Sapiens with a 14-step protocol, and a paste-ready claude_science_prompt. 17 references, temperature 0." width="820">
 
@@ -243,16 +269,17 @@ print(brief.top_experiment.claude_science_prompt)
 "
 ```
 
-The same command works for **resistant hypertension**, **melanoma**, and **rheumatoid arthritis** —
-golden mode auto-selects the matching committed brief by the observation text (see
-[Modes](#modes-live--snapshot--golden)). Melanoma and RA return **no experiment** on purpose: no
-hypothesis cleared the grounding bar, so the tool declined rather than fabricate one.
+The same command works across all **five** committed domains — **lupus, resistant hypertension,
+type 2 diabetes, melanoma, and rheumatoid arthritis** — golden mode auto-selects the matching
+committed brief by the observation text (see [Modes](#modes-live--snapshot--golden)). Melanoma and RA
+return **no experiment** on purpose: no hypothesis cleared the grounding bar, so the tool declined
+rather than fabricate one.
 
 ---
 
 ## Real-world use cases
 
-Framed as *what you'd actually do with it* — grounded in the four domains already captured here, and
+Framed as *what you'd actually do with it* — grounded in the five domains already captured here, and
 generalizable to any PubMed-covered area.
 
 - **Bench-directing a treatment non-responder.** *T2D not controlled on metformin* → TransBench
@@ -262,6 +289,11 @@ generalizable to any PubMed-covered area.
 - **Explaining a paradoxical case.** *Resistant hypertension despite triple therapy* → an
   aldosterone-independent WNK–SPAK–ENaC compensation hypothesis, grounded in real Gitelman-syndrome
   literature (PMIDs 28003083, 25841442), with a distal-tubule co-expression experiment.
+- **Directing an autoimmune case to a specific gene in a specific dataset.** *Lupus with low
+  regulatory T-cells despite standard immunosuppression* → TransBench grounds a **PTPN2 / type-I-IFN**
+  hypothesis and returns a Treg-vs-Teff single-cell experiment on **Gladstone's GSE278572**, with
+  confirm/refute criteria and 41 citations attached — the exact run captured in
+  [`golden-test-results/`](golden-test-results/).
 - **Triaging what's worth studying.** *Melanoma progressing on checkpoint blockade* and
   *methotrexate-refractory RA* → the tool retrieves the literature, finds no generated hypothesis is
   both novel and sufficiently grounded, and **ships no experiment** — telling you the easy
@@ -273,7 +305,7 @@ generalizable to any PubMed-covered area.
 **Honest scope.** "Universal" means *any clinical/biomedical observation* — this is a PubMed +
 Europe PMC + single-cell-atlas research tool, not a general non-medical engine. Some areas legitimately have
 sparser literature for a freshly-generated novel hypothesis; the same gates that demote a thin
-hypothesis in one domain apply identically everywhere, which is why two of four domains here
+hypothesis in one domain apply identically everywhere, which is why two of five domains here
 produced no experiment.
 
 ---
@@ -446,7 +478,7 @@ including every live pipeline run.
 
 ## Tests
 
-**206 tests across 15 modules** — mostly fully offline/deterministic (fake-LLM doubles, pure
+**213 tests across 16 modules** — mostly fully offline/deterministic (fake-LLM doubles, pure
 functions, or free NCBI-only calls). The handful of live Anthropic tests share **one** flagship
 pipeline run via a session-scoped fixture and skip cleanly without a key:
 
@@ -467,13 +499,18 @@ decompose→assemble.
 
 ```
 transbench/
-├─ src/transbench/     # config, schemas, prompts, reuse seam, 8 agents, rigor, LangGraph engine
-├─ mcp_server/         # FastMCP server (stdio + HTTP), run scripts, connector manifest
-├─ snapshots/          # committed golden briefs (hypertension, T2D, melanoma, RA) + retrieval snapshot
-├─ docs/               # generate_readme_assets.py + img/ (SVG cards & diagrams, generated offline)
-├─ tests/              # fixtures + 206-test suite
-├─ BUILD_SPEC.md       # full design spec        KICKOFF.md  # phase-by-phase build plan
-├─ CLAUDE_SCIENCE_SETUP.md   PLAN.md   .env.example
+├─ src/transbench/       # config, schemas, prompts, reuse seam, 8 agents, rigor, LangGraph engine
+├─ mcp_server/           # FastMCP server (stdio + HTTP), run scripts, connector manifest
+├─ snapshots/            # 5 committed golden briefs (lupus/Gladstone, hypertension, T2D, melanoma, RA) + retrieval snapshot
+├─ golden-test-results/  # the flagship Gladstone run: TransBrief + the PTPN2 / GSE278572 experiment Claude Science executed, with a sha256 MANIFEST
+├─ docs/                 # generate_readme_assets.py + img/ (SVG cards & diagrams, generated offline)
+├─ tests/                # fixtures + 213-test suite (16 modules)
+├─ config/               # LLM provider registry (providers.yaml: Anthropic Haiku/Sonnet/Opus)
+├─ scripts/              # offline-bench.sh — the keyless, deterministic bench
+├─ INSTALL_AGENT.md      # one-paste installer for non-engineer scientists
+├─ .claude/  .githooks/  # agent playbook & config + the pre-push secret-scan hook
+├─ BUILD_SPEC.md         # full design spec        KICKOFF.md  # phase-by-phase build plan
+├─ CLAUDE_SCIENCE_SETUP.md   PLAN.md   CLAUDE.md   .env.example
 ```
 
 ---
