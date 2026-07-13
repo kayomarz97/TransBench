@@ -28,3 +28,21 @@ CODE_REVIEW*.md
 # Local Claude Code settings — personal permission allowlist, never part of the public repo.
 # The shared, judge-visible config (CLAUDE.md, .claude/agents/, .claude/AGENTS_PLAYBOOK.md) IS committed.
 .claude/settings.local.json
+
+# ── make-transbench-video build (large media / captures / downloaded audio / node_modules) ──
+# None of this belongs in the public repo. The finished video is delivered out-of-band.
+assets/animations/
+assets/music/
+assets/sfx/
+build/
+output/
+remotion/node_modules/
+remotion/out/
+Demo_handoff.md
+# demo-video frame stills (PNG captures) - local build scratch
+scratchpad_frames/
+
+# Hackathon submission working files - local only, never commit (screenshot of the form
+# questions + the copy-paste answer sheet). Both are private working docs, not repo content.
+.hackathon questions.png
+submission.md
